@@ -1,0 +1,21 @@
+{
+  "name": "TokenDiscoveryFuzzer Dev Container",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer"
+      ]
+    },
+    "jetbrains": {
+      "backend": "RustRover"
+    }
+  },
+  
+  "workspaceFolder": "/workspace",
+  "remoteUser": "root"
+}
