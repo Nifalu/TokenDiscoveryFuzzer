@@ -113,7 +113,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     );
 
     // A feedback to choose if an input is a solution or not
-    let mut objective = feedback_or_fast!(CrashFeedback::new(), TimeoutFeedback::new());
+    let mut objective = feedback_or_fast!(CrashFeedback::new(), /*TimeoutFeedback::new()*/);
 
     // If not restarting, create a State from scratch
     let mut state = state.unwrap_or_else(|| {
@@ -169,6 +169,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     let mut harness = |input: &BytesInput| {
         let target = input.target_bytes();
         let buf = target.as_slice();
+        /*
         #[cfg(feature = "crash")]
         if buf.len() > 4 && buf[4] == 0 {
             unsafe {
@@ -177,6 +178,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
                 *addr = 1;
             }
         }
+        */
         unsafe {
             libfuzzer_test_one_input(buf);
         }
@@ -190,9 +192,9 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         &mut fuzzer,
         &mut state,
         &mut restarting_mgr,
-        Duration::new(10, 0),
+        Duration::new(8, 0),
     )?;
-    // 10 seconds timeout
+    // 8 seconds timeout
 
     // The actual target run starts here.
     // Call LLVMFUzzerInitialize() if present.
