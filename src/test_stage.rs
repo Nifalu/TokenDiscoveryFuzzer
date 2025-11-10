@@ -58,7 +58,7 @@ where
         executor: &mut E,
         state: &mut S,
         manager: &mut EM,
-    ) -> Result<(), libafl::Error> {
+    ) -> Result<(), Error> {
 
 
         self.num_tested += 1;
@@ -274,7 +274,7 @@ where
                 diffs.push(i);
             }
         }
-        return diffs;
+        diffs
     }
 
     pub fn clean_tokens(&self, state: &mut S) {
@@ -347,10 +347,10 @@ where
         }
 
         // fuzzer runs with immutable data transform back
-        let (untransfomred, post) = mutable_input.try_transform_into(state)?;
+        let (untransformed, post) = mutable_input.try_transform_into(state)?;
 
         // check if mutated input is interesting
-        let evaluation = fuzzer.evaluate_filtered(state, executor, manager, &untransfomred)?;
+        let evaluation = fuzzer.evaluate_filtered(state, executor, manager, &untransformed)?;
         let (exec_result, corpus_id) = evaluation;
 
 
@@ -411,12 +411,12 @@ impl<E, EM, I, S, M, F, C, Z, O> Restartable<S> for TestStage<E, EM, I, S, M, F,
 where
     S: HasMetadata + HasNamedMetadata + HasCurrentCorpusId,
 {
-    fn should_restart(&mut self, state: &mut S) -> Result<bool, libafl::Error> {
+    fn should_restart(&mut self, state: &mut S) -> Result<bool, Error> {
         // Make sure we don't get stuck crashing on a single testcase
         RetryCountRestartHelper::should_restart(state, &self.name, 3)
     }
 
-    fn clear_progress(&mut self, state: &mut S) -> Result<(), libafl::Error> {
+    fn clear_progress(&mut self, state: &mut S) -> Result<(), Error> {
         RetryCountRestartHelper::clear_progress(state, &self.name)
     }
 }

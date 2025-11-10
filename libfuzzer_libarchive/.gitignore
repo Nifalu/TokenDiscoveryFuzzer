@@ -1,4 +1,11 @@
 corpus/
 libarchive-*
 crashes/
-
+crashes_organized/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.bin

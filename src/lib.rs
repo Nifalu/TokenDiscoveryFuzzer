@@ -1,5 +1,4 @@
-//! A libfuzzer-like fuzzer with llmp-multithreading support and restarts
-//! The example harness is built for libpng.
+
 use core::time::Duration;
 #[cfg(feature = "crash")]
 use std::ptr;
@@ -13,7 +12,7 @@ use libafl::{
     events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
     executors::{inprocess::InProcessExecutor, ExitKind},
     feedback_or, feedback_or_fast,
-    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
+    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, /*TimeoutFeedback*/},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
     monitors::{MultiMonitor, PrometheusMonitor},
@@ -64,7 +63,7 @@ pub extern "C" fn libafl_main() {
 
 /// The actual fuzzer
 fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Result<(), Error> {
-    // 'While the stats are state, they are usually used in the broker - which is likely never restarted
+    // While the stats are state, they are usually used in the broker - which is likely never restarted
     let mon = PrometheusMonitor::new("0.0.0.0:8081".to_string(), |s| log::info!("{s}"));
     let multi = MultiMonitor::new(|s| println!("{s}"));
     let monitor = tuple_list!(mon, multi);
@@ -162,7 +161,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         tuple_list!(calibration, std_stage)
     };
 
-    // A minimization+queue policy to get testcasess from the corpus
+    // A minimization+queue policy to get testcases from the corpus
     let scheduler = IndexesLenTimeMinimizerScheduler::new(
         &edges_observer,
         StdWeightedScheduler::with_schedule(
@@ -207,7 +206,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     // 8 seconds timeout
 
     // The actual target run starts here.
-    // Call LLVMFUzzerInitialize() if present.
+    // Call LLVMFuzzerInitialize() if present.
     let args: Vec<String> = env::args().collect();
     if unsafe { libfuzzer_initialize(&args) } == -1 {
         println!("Warning: LLVMFuzzerInitialize failed with -1");
