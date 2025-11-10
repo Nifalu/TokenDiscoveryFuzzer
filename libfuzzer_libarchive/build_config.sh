@@ -24,14 +24,14 @@ compile_with_token_discovery() {
     $LIBAFL_CXX_WITH_TOKENS harness.cc libarchive.a \
         -I ${LIBARCHIVE_DIR}/libarchive/ \
         -lz -lbz2 -llzma -lzstd -lcrypto -lxml2 \
-        -o libarchive_with_token_discovery
+        -o fuzz_libarchive_with_token_discovery
 }
 
 compile_without_token_discovery() {
     $LIBAFL_CXX_WITHOUT_TOKENS harness.cc libarchive.a \
         -I ${LIBARCHIVE_DIR}/libarchive/ \
         -lz -lbz2 -llzma -lzstd -lcrypto -lxml2 \
-        -o libarchive_without_token_discovery
+        -o fuzz_libarchive_without_token_discovery
 }
 
 compile_test() {

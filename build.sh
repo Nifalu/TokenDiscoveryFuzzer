@@ -58,8 +58,8 @@ case $ACTION in
         compile_test
 
         echo "Build complete!"
-        echo "  With tokens:    $TARGET_DIR/${TARGET}_with_token_discovery"
-        echo "  Without tokens: $TARGET_DIR/${TARGET}_without_token_discovery"
+        echo "  With tokens:    $TARGET_DIR/fuzz_${TARGET}_with_token_discovery"
+        echo "  Without tokens: $TARGET_DIR/fuzz_${TARGET}_without_token_discovery"
         echo "  Tester:         $TARGET_DIR/test_${TARGET}"
         ;;
 

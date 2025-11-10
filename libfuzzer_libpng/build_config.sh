@@ -19,7 +19,7 @@ compile_fuzzer() {
         -I libpng-1.6.37/ \
         -DLIBPNG_SILENCE_ERRORS \
         -lz -lm \
-        -o fuzzer_libpng
+        -o fuzz_fuzzer_libpng
 }
 
 compile_test() {
@@ -28,7 +28,7 @@ compile_test() {
         -DLIBPNG_SILENCE_ERRORS \
         -lz -lm \
         -g -fsanitize=address \
-        -o test_libpng
+        -o fuzz_test_libpng
 }
 
 clean_target() {

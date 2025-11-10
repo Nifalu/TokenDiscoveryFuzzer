@@ -53,4 +53,10 @@ linking the harness.cc
 -lz -lbz2 -llzma -lzstd -lcrypto -lxml2
 ```
 
-linking with main.cc
+```
+clang++ -DSTANDALONE_BUILD harness.cc libarchive.a \
+-I ${LIBARCHIVE_DIR}/libarchive/ \
+-lz -lbz2 -llzma -lzstd -lcrypto -lxml2 \
+-g -fsanitize=address \
+-o test_libarchive
+```
