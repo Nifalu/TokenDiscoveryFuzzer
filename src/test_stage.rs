@@ -22,7 +22,7 @@ pub const STAGE_NAME: &str = "Test Stage";
 pub struct TestStage<E, EM, I, S, M, F, C, Z, O>{
     name: Cow<'static, str>,
     mutator: M,
-    num_tested: u32,
+    stage_executions: u32, // how many times this stage has been called/executed
     observer_handle: Handle<C>,
     phantom: PhantomData<(E, EM, I, S, F, Z, O)>
 }
@@ -61,46 +61,46 @@ where
     ) -> Result<(), Error> {
 
 
-        self.num_tested += 1;
+        /* Remove duplicate tokens and get the current testcase (input) */
+        self.stage_executions += 1;
         self.clean_tokens(state);
-        let optional_input = self.current_testcase_as_input(state)?;
 
-        let Some(input) = optional_input else {
+        let Some(input) = self.current_testcase_as_input(state)? else {
             return Ok(());
         };
 
+        /* The more interesting the current testcase is, the more often it should be mutated */
         let num_iterations = self.iterations(state)?;
-        let mut interesting_corpora: HashSet<Option<CorpusId>> = HashSet::new();
 
-        // mutate input if interesting add to search
+        /* Apply mutations to the input and extend the corpus with interesting mutations */
+        let mut interesting_corpora: HashSet<CorpusId> = HashSet::new();
         for _ in 0..num_iterations {
-            let mutable = input.clone();
-            let corpus_id = self.mutate_and_evaluate(mutable, fuzzer, executor, state, manager)?;
-
-            if corpus_id.is_some() {
-                interesting_corpora.insert(corpus_id);
-            }
+            /* Each mutation is run against the fuzzing target */
+            let corpus_id = self.mutate_and_evaluate(input.clone(), fuzzer, executor, state, manager)?;
+            interesting_corpora.extend(corpus_id); // Iterator won't push None values
         }
 
-        // search for new tokens every 1000 executions
-        if self.num_tested % 1000 == 0 {
-            let token_data = state.metadata_mut::<Tokens>()?;
-            for token in token_data.iter() {
-                let ascii = unsafe {std::str::from_utf8_unchecked(token)};
-                let byte_len = token.len();
-                println!("The token has {byte_len} bytes");
-                println!("The string representation of the token is: {ascii}");
-                println!();
-            }
-            let empty: Vec<Vec<u8>> = Vec::new();
-            state.add_metadata(Tokens::from(empty));
-        }
-
-        // go through interesting corpora look for tokens
+        /* Search for new tokens */
         for id in interesting_corpora {
             self.search_tokens(&input, id, fuzzer, executor, state, manager)?;
         }
 
+        /* print new tokens every N executions of this stage */
+        if self.stage_executions % 1000 == 0 {
+            let token_data = state.metadata_mut::<Tokens>()?;
+            for token in token_data.iter() {
+                println!("Token of length {}B found:", token.len());
+                println!("  Decimal: {:?}", token);
+                println!("  Hex:     {:02x?}", token);
+                let ascii = String::from_utf8_lossy(token);
+                println!("  ASCII:   {}", ascii);
+            }
+
+            /* Delete all tokens to make room for new ones */
+            println!("\n == CLEARED {} TOKENS ==", token_data.len());
+            let empty: Vec<Vec<u8>> = Vec::new();
+            state.add_metadata(Tokens::from(empty));
+        }
         Ok(())
     }
 }
@@ -137,7 +137,7 @@ where
         Self {
             mutator,
             name: Cow::Owned(STAGE_NAME.to_owned()),
-            num_tested: 0,
+            stage_executions: 0,
             observer_handle: observer.handle(),
             phantom: PhantomData,
         }
@@ -146,54 +146,46 @@ where
     pub fn search_tokens(
         &mut self,
         original: &I,
-        corpus_id: Option<CorpusId>,
+        corpus_id: CorpusId,
         fuzzer: &mut Z,
         executor: &mut E,
         state: &mut S,
         manager: &mut EM,
     ) -> Result<(), Error>{
 
-        // search the indices that differ
-        let opt_mut = self.mutated_testcase_as_input(state, corpus_id)?;
-        let Some(mutated) = opt_mut else {
+        /* get the mutated input */
+        let Some(mutated) = self.mutated_testcase_as_input(state, corpus_id)? else {
             return Err(Error::empty("The mutated input could not be found"));
         };
 
         let input_bytes = original.target_bytes().clone();
+
+        /* Find out which bits have changed during the mutation steps above */
         let diff_indices = self.search_diff_index(&original, &mutated);
         if !diff_indices.is_empty() {
             let mut seen_indices: HashSet<usize> = HashSet::new();
+
+            /* Go through the indices that have changed*/
             for index in diff_indices {
+                let token_data = state.metadata_mut::<Tokens>()?;
 
-                // only search for tokens if under threshold
-                {
-                    let token_data = state.metadata_mut::<Tokens>()?;
-
-                    // early return if tokens are over threshold
-                    if token_data.len() >= 100 {
-                        return Ok(());
-                    }
+                /* if we found too many tokens we don't look for more? */
+                if token_data.len() >= 100 {
+                    return Ok(());
                 }
 
-                if index < 1 {
+                if index < 1 || seen_indices.contains(&index) {
                     continue;
                 }
 
-                if seen_indices.contains(&index) {
-                    continue;
-                }
-
-                // analyzing the diff itself left and right
                 seen_indices.insert(index);
+
+                /* place the changed bit into the input byte vector */
                 let mut raw_bytes = input_bytes.to_vec();
                 let changed_byte = mutated.target_bytes()[index];
                 raw_bytes[index] = changed_byte;
 
-                let mut analyze_bytes = input_bytes.to_vec();
-                let mut left_index = index -1;
-                let mut right_index = index + 1;
-
-
+                /* get the coverage of the original input with just that one changed bit*/
                 let raw_coverage = self.get_input_coverage(
                     &raw_bytes.clone().into(),
                     fuzzer,
@@ -202,6 +194,12 @@ where
                     manager
                 )?;
 
+                /* prepare indices*/
+                let mut analyze_bytes = input_bytes.to_vec();
+                let mut left_index = index -1;
+                let mut right_index = index + 1;
+
+                /* iteratively move the left index to the left and compare the coverage */
                 loop {
 
                     if left_index <= 0 || index - left_index + 1 >= 2 {
@@ -227,6 +225,7 @@ where
                     left_index -= 1;
                 }
 
+                /* iteratively move the right index to the right and compare the coverage */
                 loop {
 
                     if right_index >= input_bytes.len() || right_index - index -1 >= 2{
@@ -252,6 +251,7 @@ where
                     right_index += 1;
                 }
 
+                /* extract the values at the indices of the discovered token and store it */
                 let token = &input_bytes.clone()[left_index..right_index].to_vec();
                 let token_data = state.metadata_mut::<Tokens>()?;
                 if !token_data.contains(token) {
@@ -263,6 +263,9 @@ where
         Ok(())
     }
 
+    /**
+    Determine the indices of the bytes that have been mutated
+    */
     pub fn search_diff_index(&self, original: &I, mutated: &I) -> Vec<usize> {
         // find diff between original and mutated
         let mut diffs = Vec::<usize>::new();
@@ -277,6 +280,9 @@ where
         diffs
     }
 
+    /**
+    Get rid of duplicate tokens and tokens which are fully contained inside another token
+    */
     pub fn clean_tokens(&self, state: &mut S) {
         let tokens_clone = state.metadata::<Tokens>().unwrap().clone();
         let mut unique: Vec<Vec<u8>> = Vec::new();
@@ -300,7 +306,9 @@ where
         state.add_metadata(Tokens::from(unique.into_boxed_slice()));
     }
 
-
+    /**
+    Get the current testcase from the corpus if transformation to <I> was successful.
+    */
     fn current_testcase_as_input(&self, state: &mut S) -> Result<Option<I>, Error> {
         // transform Testcase<I> containing the input to I
         let mut testcase = state.current_testcase_mut()?;
@@ -311,27 +319,23 @@ where
         Ok(Some(input))
     }
 
+
     fn mutated_testcase_as_input(
         &self,
         state: &mut S,
-        corpus_id: Option<CorpusId>
+        corpus_id: CorpusId
     ) -> Result<Option<I>, Error> {
-
-        let Some(id) = corpus_id else {
-            return Err(Error::empty("The corpus id is empty"));
-        };
-
-        let mut mutated_testcase = state.corpus().get(id)?.borrow_mut();
-        let Ok(mutated) = I::try_transform_from(&mut mutated_testcase, state) else {
-            return Ok(None);
-        };
-
-        Ok(Some(mutated))
+        let mut mutated_testcase = state.corpus().get(corpus_id)?.borrow_mut();
+        Ok(I::try_transform_from(&mut mutated_testcase, state).ok())
     }
 
+    /**
+    Mutate the input and run it once.
+    If it was interesting, add it as new testcase to the corpus and return the id
+    */
     fn mutate_and_evaluate(
         &mut self,
-        input: I,
+        mut input: I,
         fuzzer: &mut Z,
         executor: &mut E,
         state: &mut S,
@@ -339,20 +343,18 @@ where
     ) -> Result<Option<CorpusId>, Error>{
 
         // make the input mutable and mutate
-        let mut mutable_input = input.clone();
-        let mutation_result = self.mutator_mut().mutate(state, &mut mutable_input)?;
+        let mutation_result = self.mutator_mut().mutate(state, &mut input)?;
 
         if mutation_result == MutationResult::Skipped {
             return Ok(None);
         }
 
-        // fuzzer runs with immutable data transform back
-        let (untransformed, post) = mutable_input.try_transform_into(state)?;
+        // Pretty sure this does nothing when running with ByteInput...?
+        let (untransformed, post) = input.try_transform_into(state)?;
 
         // check if mutated input is interesting
         let evaluation = fuzzer.evaluate_filtered(state, executor, manager, &untransformed)?;
         let (exec_result, corpus_id) = evaluation;
-
 
         if exec_result.is_solution() {
             println!("Found new solution persisting on disk");
@@ -436,9 +438,14 @@ where
         &mut self.mutator
     }
 
+    /**
+    Calculates the score of the current testcase which determines how many times we should
+    iterate/mutate this testcase. (higher scores mean more mutations will be done)
+    */
     fn iterations(&self, state: &mut S) -> Result<usize, Error> {
-        // Update handicap
+        // Gets the current Testcase we are fuzzing (mut)
         let mut testcase = state.current_testcase_mut()?;
+        // Computes the favor factor of a Testcase. Higher is better.
         let score = F::compute(state, &mut testcase)? as usize;
 
         Ok(score)

@@ -41,6 +41,7 @@ int memory_close_callback(struct archive *a, void *client_data) {
 }
 
 // Entry point for LibFuzzer
+// Entry point for LibFuzzer
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (size < 4) {
         return 0; // Too small to be meaningful
@@ -97,6 +98,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         return 0;
     }
 
+    // Get archive format information for coverage
+    int format = archive_format(a);
+    const char *format_name = archive_format_name(a);
+    int compression = archive_filter_code(a, 0);
+    const char *compression_name = archive_filter_name(a, 0);
+
+    (void)format; (void)format_name;
+    (void)compression; (void)compression_name;
+
     // Process archive entries
     int entries_processed = 0;
     const int max_entries = 100; // Limit number of entries to process
@@ -115,19 +125,51 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         // Get entry information (this exercises more code paths)
         const char *pathname = archive_entry_pathname(entry);
         if (pathname) {
-            // Just accessing the pathname exercises string handling
             size_t path_len = strlen(pathname);
-            (void)path_len; // Suppress unused variable warning
+            (void)path_len;
         }
 
         la_int64_t entry_size = archive_entry_size(entry);
         mode_t mode = archive_entry_mode(entry);
         time_t mtime = archive_entry_mtime(entry);
 
-        // Suppress unused variable warnings
-        (void)entry_size;
-        (void)mode;
-        (void)mtime;
+        // Additional metadata extraction for more coverage
+        const char *uname = archive_entry_uname(entry);
+        const char *gname = archive_entry_gname(entry);
+        const char *hardlink = archive_entry_hardlink(entry);
+        const char *symlink = archive_entry_symlink(entry);
+        uid_t uid = archive_entry_uid(entry);
+        gid_t gid = archive_entry_gid(entry);
+        dev_t rdev = archive_entry_rdev(entry);
+
+        // Extended attributes and ACLs
+        archive_entry_xattr_reset(entry);
+        const char *xattr_name;
+        const void *xattr_value;
+        size_t xattr_size;
+        while (archive_entry_xattr_next(entry, &xattr_name, &xattr_value, &xattr_size) == ARCHIVE_OK) {
+            // Just iterate to exercise the code
+        }
+
+        // File type checks - exercises different code paths
+        if (archive_entry_filetype(entry) == AE_IFREG) {
+            // Regular file
+        } else if (archive_entry_filetype(entry) == AE_IFDIR) {
+            // Directory
+        } else if (archive_entry_filetype(entry) == AE_IFLNK) {
+            // Symbolic link
+        }
+
+        // Sparse file information
+        int sparse_count = archive_entry_sparse_count(entry);
+        for (int i = 0; i < sparse_count && i < 10; i++) {
+            la_int64_t offset, length;
+            archive_entry_sparse_next(entry, &offset, &length);
+        }
+
+        (void)entry_size; (void)mode; (void)mtime;
+        (void)uname; (void)gname; (void)hardlink; (void)symlink;
+        (void)uid; (void)gid; (void)rdev;
 
         // Try to read some data from the entry (limited to avoid excessive processing)
         if (archive_entry_size_is_set(entry) && archive_entry_size(entry) > 0) {
