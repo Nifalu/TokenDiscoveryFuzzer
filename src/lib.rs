@@ -147,6 +147,8 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
 
     #[cfg(feature = "token_discovery")]
+    eprintln!("TOKEN DISCOVERY FEATURE IS ENABLED!");
+    #[cfg(feature = "token_discovery")]
     let mut stages = {
         use token_discovery_stage::TokenDiscoveryStage;
         let token_discovery_stage: TokenDiscoveryStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _>
@@ -154,6 +156,8 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         tuple_list!(calibration, token_discovery_stage)
     };
 
+    #[cfg(not(feature = "token_discovery"))]
+    eprintln!("TOKEN DISCOVERY FEATURE IS DISABLED!");
     #[cfg(not(feature = "token_discovery"))]
     let mut stages = {
         use libafl::stages::mutational::StdMutationalStage;

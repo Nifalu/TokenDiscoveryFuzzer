@@ -1,5 +1,6 @@
+use libafl_bolts::rands::Rand;
 use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
-use std::cmp::{max, min};
+use std::cmp::min;
 use libafl::{
     corpus::{Corpus, CorpusId, HasCurrentCorpusId},
     events::EventFirer,
@@ -19,8 +20,28 @@ use libafl::{
 use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
-const MAXTOKENLENGTH: usize = 6; // in bytes
+
+/**
+ Set maximum length a token can have.
+ larger values may impact performance
+ */
+const MAXTOKENLENGTH: usize = 12; // in bytes
+
+/**
+ Set the minimum length a token must have.
+ Large values may reduce the chance of finding tokens at all.
+ */
 const MINTOKENLENGTH: usize = 2; // in bytes
+
+/**
+ Ignore Tokens which are subsets of existing tokens
+ */
+const PREFERLARGERTOKENS: bool = true;
+
+/**
+ Ignore Tokens which are supersets of existing tokens
+ */
+const PREFERSMALLERTOKENS: bool = false;
 
 pub struct TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>{
     name: Cow<'static, str>,
@@ -66,9 +87,6 @@ where
         /* Remove duplicate tokens and get the current testcase (input) */
         self.stage_executions += 1;
 
-        println!("called perform!");
-
-        self.clean_tokens(state);
 
         let input = {
             let mut testcase = state.current_testcase_mut()?;
@@ -98,9 +116,12 @@ where
         if self.stage_executions % 1000 == 0 {
             let token_data = state.metadata_mut::<Tokens>()?;
             /* Delete all tokens to make room for new ones */
-            println!("\n == CLEARED {} TOKENS ==", token_data.len());
-            let empty: Vec<Vec<u8>> = Vec::new();
-            state.add_metadata(Tokens::from(empty));
+            if token_data.len() > 100 {
+                println!("\n\n ========================= CLEARED {} TOKENS ========================= \n\n", token_data.len());
+                let empty: Vec<Vec<u8>> = Vec::new();
+                state.add_metadata(Tokens::from(empty));
+            }
+
         }
         Ok(())
     }
@@ -185,44 +206,42 @@ where
         let mutated_seq = mutated_input.target_bytes().to_vec();
         let mut test_seq = original_seq.clone();
 
-        /* Implicitly there must be a difference because the mutator will always mutate something.
-        if original_bytes.as_ref() == mutated_bytes.as_ref() {
-            return Ok(()) // Can't find a token without a mutation
-        }
-        */
-
         let baseline_coverage = self.get_input_coverage(
             original_input, fuzzer, executor, state, manager)?;
         let mut lower_bound : usize= 0;
         let mut upper_bound : usize = 0;
 
 
-        /* add mutations until we get more coverage (move upper bound to the right) */
-        //TODO how do we handle the case when the mutator increased the length of the vector?
-        //Dirty fix:
-        if test_seq.len() < mutated_seq.len() {
-            println!("mutated sequence is longer than test sequence");
-            return Ok(())
-        }
-
+        let test_seq_len = test_seq.len()-1;
         for i in 0..mutated_seq.len() {
-            test_seq[i] = mutated_seq[i];
+            if i > test_seq_len {
+                test_seq.push(mutated_seq[i])
+            } else {
+                test_seq[i] = mutated_seq[i];
+            }
 
             let coverage = self.get_input_coverage(
                 &test_seq.clone().into(),
                 fuzzer, executor, state, manager)?;
 
             if coverage != baseline_coverage {
-                upper_bound = i;
+                upper_bound = i+1; // exclusive
+                lower_bound = i; // in case the loop below does not trigger a break
                 break;
             }
         }
 
         /* remove mutations and check non-mutations from the left (move lower bound to the right) */
-        for i in max(0, upper_bound-MAXTOKENLENGTH)..upper_bound {
+        for i in upper_bound.saturating_sub(MAXTOKENLENGTH)..upper_bound {
+            if i > test_seq_len {
+                // in this case the relevant subsequence consists of only the newly added part
+                lower_bound = i;
+                break;
+            }
+
             let tmp = test_seq[i]; // cache current value
             if test_seq[i] == original_seq[i] {
-                test_seq[i] = 255 // put a random u8 here.
+                test_seq[i] = state.rand_mut().next() as u8; // put a random u8 here.
             } else {
                 test_seq[i] = original_seq[i]
             }
@@ -237,9 +256,13 @@ where
             }
         }
 
-        for i in upper_bound+1..min(mutated_seq.len(), lower_bound+MAXTOKENLENGTH) {
+        for i in upper_bound..min(mutated_seq.len(), lower_bound+MAXTOKENLENGTH) {
+            if i > test_seq_len {
+                break // upper bound is already at correct location.
+            }
+
             let tmp = test_seq[i];
-            test_seq[i] = 255; // put a random u8 here
+            test_seq[i] = state.rand_mut().next() as u8; // put a random u8 here.
 
             let coverage = self.get_input_coverage(
                 &test_seq.clone().into(),
@@ -251,51 +274,59 @@ where
                 break;
             }
         }
-
         /* Add the token to the fuzzer */
         let token_length = upper_bound - lower_bound;
         if token_length >= MINTOKENLENGTH {
-            let token = test_seq[lower_bound..upper_bound].to_vec();
-            let token_data = state.metadata_mut::<Tokens>()?;
-            if !token_data.contains(&token) {
-                token_data.add_token(&token);
-                println!("Token of length {}B added:", token.len());
-                println!("  Decimal: {:?}", token);
-                println!("  Hex:     {:02x?}", token);
-                let ascii = String::from_utf8_lossy(&token);
-                println!("  ASCII:   {}", ascii);
-            }
+            let new_token = test_seq[lower_bound..upper_bound].to_vec();
+            assert!(new_token.len() <= MAXTOKENLENGTH, "Token too large... \nupper: {}, \nlower: {}, \nlength: {}", upper_bound, lower_bound, new_token.len());
+            Self::add_token(new_token, state).ok();
         }
-
         Ok(())
-
     }
 
     /**
-    Get rid of duplicate tokens and tokens which are fully contained inside another token
+    Adds a Token to the state as long as it's not already in there.
     */
-    pub fn clean_tokens(&self, state: &mut S) {
-        let tokens_clone = state.metadata::<Tokens>().unwrap().clone();
-        let mut unique: Vec<Vec<u8>> = Vec::new();
+    fn add_token(new_token: Vec<u8>, state: &mut S) -> Result<(), Error> {
 
-        'outer: for token in tokens_clone.iter() {
-            for other in tokens_clone.iter() {
-                if token == other {
-                    continue;
-                }
-
-                // Only discard `token` if it is shorter and fully inside `other`
-                if token.len() < other.len() &&
-                    other.windows(token.len()).any(|w| w == token) {
-                    continue 'outer; // discard token
-                }
-            }
-
-            unique.push(token.clone());
+        fn is_subset_of(small: &[u8], large: &[u8]) -> bool {
+            small.len() < large.len() && large.windows(small.len()).any(|w| w == small)
         }
 
-        state.add_metadata(Tokens::from(unique.into_boxed_slice()));
+
+        let token_data = state.metadata_mut::<Tokens>()?;
+
+        let mut can_add: bool = true;
+        for existing_token in token_data.iter() {
+
+            if existing_token == &new_token {
+                can_add = false;
+                break
+            }
+
+            if PREFERLARGERTOKENS && is_subset_of(&new_token, existing_token) {
+                can_add = false;
+                break;
+            }
+
+            if PREFERSMALLERTOKENS && is_subset_of(existing_token, &new_token) {
+                can_add = false;
+                break;
+            }
+        }
+
+        if can_add {
+            token_data.add_token(&new_token);
+            println!("Token of length {}B added:", new_token.len());
+            println!("  Decimal: {:?}", new_token);
+            println!("  Hex:     {:02x?}", new_token);
+            let ascii = String::from_utf8_lossy(&new_token);
+            println!("  ASCII:   {}", ascii);
+            println!();
+        }
+        Ok(())
     }
+
 
 
     /**
