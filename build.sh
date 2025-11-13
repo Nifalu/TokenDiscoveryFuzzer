@@ -15,26 +15,22 @@ fi
 
 case $ACTION in
     build)
-        # Build LibAFL framework WITH token discovery
+        # Build WITH token discovery in a separate directory
         echo "Building LibAFL framework with token discovery..."
-        cargo build --release --features token_discovery
+        cargo build --release --target-dir target_with_tokens
 
-        # Copy with descriptive names but keeping cc/cxx suffix
-        cp target/release/libafl_cc target/release/libafl_tokens_cc
-        cp target/release/libafl_cxx target/release/libafl_tokens_cxx
-
-        # Build LibAFL framework WITHOUT token discovery
+        # Build WITHOUT token discovery in a separate directory
         echo "Building LibAFL framework without token discovery..."
-        cargo build --release --no-default-features
+        cargo build --release --no-default-features --features std --target-dir target_without_tokens
 
-        # Copy plain versions
-        cp target/release/libafl_cc target/release/libafl_plain_cc
-        cp target/release/libafl_cxx target/release/libafl_plain_cxx
+        # Export environment variables pointing to the correct directories
+        export LIBAFL_CC_WITH_TOKENS="$(pwd)/target_with_tokens/release/libafl_cc"
+        export LIBAFL_CXX_WITH_TOKENS="$(pwd)/target_with_tokens/release/libafl_cxx"
 
-        export LIBAFL_CC_WITH_TOKENS="$(pwd)/target/release/libafl_tokens_cc"
-        export LIBAFL_CXX_WITH_TOKENS="$(pwd)/target/release/libafl_tokens_cxx"
-        export LIBAFL_CC_WITHOUT_TOKENS="$(pwd)/target/release/libafl_plain_cc"
-        export LIBAFL_CXX_WITHOUT_TOKENS="$(pwd)/target/release/libafl_plain_cxx"
+        export LIBAFL_CC_WITHOUT_TOKENS="$(pwd)/target_without_tokens/release/libafl_cc"
+        export LIBAFL_CXX_WITHOUT_TOKENS="$(pwd)/target_without_tokens/release/libafl_cxx"
+
+        # No need for LIBAFL_LIB variables anymore - the wrappers will find them automatically
 
         cd "$TARGET_DIR"
         source ./build_config.sh
