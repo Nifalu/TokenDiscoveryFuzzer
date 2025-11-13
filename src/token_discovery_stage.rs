@@ -1,5 +1,5 @@
 use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
-
+use std::cmp::{max, min};
 use libafl::{
     corpus::{Corpus, CorpusId, HasCurrentCorpusId},
     events::EventFirer,
@@ -18,8 +18,11 @@ use libafl::{
 };
 use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 
-pub const STAGE_NAME: &str = "Test Stage";
-pub struct TestStage<E, EM, I, S, M, F, C, Z, O>{
+pub const STAGE_NAME: &str = "TokenDiscoveryStage";
+const MAXTOKENLENGTH: usize = 6; // in bytes
+const MINTOKENLENGTH: usize = 2; // in bytes
+
+pub struct TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>{
     name: Cow<'static, str>,
     mutator: M,
     stage_executions: u32, // how many times this stage has been called/executed
@@ -27,7 +30,7 @@ pub struct TestStage<E, EM, I, S, M, F, C, Z, O>{
     phantom: PhantomData<(E, EM, I, S, F, Z, O)>
 }
 
-impl<E, EM, I, S, M, F, C, Z, O> Stage<E, EM, S, Z> for TestStage<E, EM, I, S, M, F, C, Z, O>
+impl<E, EM, I, S, M, F, C, Z, O> Stage<E, EM, S, Z> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
 where
     E:  Executor<EM, I, S, Z>
     +HasObservers,
@@ -60,13 +63,19 @@ where
         manager: &mut EM,
     ) -> Result<(), Error> {
 
-
         /* Remove duplicate tokens and get the current testcase (input) */
         self.stage_executions += 1;
+
+        println!("called perform!");
+
         self.clean_tokens(state);
 
-        let Some(input) = self.current_testcase_as_input(state)? else {
-            return Ok(());
+        let input = {
+            let mut testcase = state.current_testcase_mut()?;
+            match I::try_transform_from(&mut testcase, state).ok() {
+                Some(i) => i,
+                None => return Ok(()),
+            }
         };
 
         /* The more interesting the current testcase is, the more often it should be mutated */
@@ -88,14 +97,6 @@ where
         /* print new tokens every N executions of this stage */
         if self.stage_executions % 1000 == 0 {
             let token_data = state.metadata_mut::<Tokens>()?;
-            for token in token_data.iter() {
-                println!("Token of length {}B found:", token.len());
-                println!("  Decimal: {:?}", token);
-                println!("  Hex:     {:02x?}", token);
-                let ascii = String::from_utf8_lossy(token);
-                println!("  ASCII:   {}", ascii);
-            }
-
             /* Delete all tokens to make room for new ones */
             println!("\n == CLEARED {} TOKENS ==", token_data.len());
             let empty: Vec<Vec<u8>> = Vec::new();
@@ -108,7 +109,7 @@ where
 /*
 =========================================================================================================
 */
-impl <E, EM, I, S, M, F, C, Z, O> TestStage <E, EM, I, S, M, F, C, Z, O>
+impl <E, EM, I, S, M, F, C, Z, O> TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
 where
     E:  Executor<EM, I, S, Z>
     +HasObservers,
@@ -133,7 +134,7 @@ where
     O:  MapObserver,
 {
 
-    pub  fn new(mutator: M, observer: &C) -> Self {
+    pub fn new(mutator: M, observer: &C) -> Self {
         Self {
             mutator,
             name: Cow::Owned(STAGE_NAME.to_owned()),
@@ -143,141 +144,131 @@ where
         }
     }
 
+    /**
+    Search for Tokens within the mutated input.
+
+    When a mutation leads to more coverage, the fuzzer will treat it as interesting and add it
+    to the corpus. This algorithm works on the assumption that the mutated_input has a different
+    coverage than the original input. It tries to figure out, what parts of the mutated_input
+    are responsible for the change.
+
+    General idea of the algorithm:
+    Add individual bytes from the mutated input one by one to the original input (test sequence).
+    1. At some point the coverage map should change, which means whatever caused the change
+    is now inside our test sequence.
+    As soon as this is the case, set that position as upper_bound.
+    2. Now undo the mutations or change bytes from the left again in order to catch bytes which
+    are not necessary for the coverage map to change. (adjust lower bound)
+    3. The lower bound should now start at the point where the relevant subsequence starts.
+    But the upper bound is at the position of the last relevant mutation, the relevant section
+    could be further to the right tough. So we have to verify some bytes to the right.
+     */
     pub fn search_tokens(
         &mut self,
-        original: &I,
+        original_input: &I,
         corpus_id: CorpusId,
         fuzzer: &mut Z,
         executor: &mut E,
         state: &mut S,
         manager: &mut EM,
-    ) -> Result<(), Error>{
-
-        /* get the mutated input */
-        let Some(mutated) = self.mutated_testcase_as_input(state, corpus_id)? else {
-            return Err(Error::empty("The mutated input could not be found"));
+    ) -> Result<(), Error> {
+        /* Get the mutated testcase */
+        let Ok(mutated_input) = I::try_transform_from(
+            &mut *state.corpus().get(corpus_id)?.borrow_mut(),
+            state
+        ) else {
+            return Ok(());  // Skip gracefully if transformation fails
         };
 
-        let input_bytes = original.target_bytes().clone();
+        /* convert the inputs into bytes and calculate indices of differences */
+        let original_seq = original_input.target_bytes().to_vec();
+        let mutated_seq = mutated_input.target_bytes().to_vec();
+        let mut test_seq = original_seq.clone();
 
-        /* Find out which bits have changed during the mutation steps above */
-        let diff_indices = self.search_diff_index(&original, &mutated);
-        if !diff_indices.is_empty() {
-            let mut seen_indices: HashSet<usize> = HashSet::new();
-
-            /* Go through the indices that have changed*/
-            for index in diff_indices {
-                let token_data = state.metadata_mut::<Tokens>()?;
-
-                /* if we found too many tokens we don't look for more? */
-                if token_data.len() >= 100 {
-                    return Ok(());
-                }
-
-                if index < 1 || seen_indices.contains(&index) {
-                    continue;
-                }
-
-                seen_indices.insert(index);
-
-                /* place the changed bit into the input byte vector */
-                let mut raw_bytes = input_bytes.to_vec();
-                let changed_byte = mutated.target_bytes()[index];
-                raw_bytes[index] = changed_byte;
-
-                /* get the coverage of the original input with just that one changed bit*/
-                let raw_coverage = self.get_input_coverage(
-                    &raw_bytes.clone().into(),
-                    fuzzer,
-                    executor,
-                    state,
-                    manager
-                )?;
-
-                /* prepare indices*/
-                let mut analyze_bytes = input_bytes.to_vec();
-                let mut left_index = index -1;
-                let mut right_index = index + 1;
-
-                /* iteratively move the left index to the left and compare the coverage */
-                loop {
-
-                    if left_index <= 0 || index - left_index + 1 >= 2 {
-                        break;
-                    }
-
-                    seen_indices.insert(left_index);
-                    let original_byte = analyze_bytes[left_index];
-                    analyze_bytes[left_index] = changed_byte;
-                    let left_coverage = self.get_input_coverage(
-                        &analyze_bytes.clone().into(),
-                        fuzzer,
-                        executor,
-                        state,
-                        manager
-                    )?;
-
-                    if raw_coverage != left_coverage {
-                        break;
-                    }
-
-                    analyze_bytes[left_index] = original_byte;
-                    left_index -= 1;
-                }
-
-                /* iteratively move the right index to the right and compare the coverage */
-                loop {
-
-                    if right_index >= input_bytes.len() || right_index - index -1 >= 2{
-                        break;
-                    }
-
-                    seen_indices.insert(right_index);
-                    let original_byte = analyze_bytes[right_index];
-                    analyze_bytes[right_index] = changed_byte;
-                    let right_coverage = self.get_input_coverage(
-                        &analyze_bytes.clone().into(),
-                        fuzzer,
-                        executor,
-                        state,
-                        manager
-                    )?;
-
-                    if raw_coverage != right_coverage {
-                        break;
-                    }
-
-                    analyze_bytes[right_index] = original_byte;
-                    right_index += 1;
-                }
-
-                /* extract the values at the indices of the discovered token and store it */
-                let token = &input_bytes.clone()[left_index..right_index].to_vec();
-                let token_data = state.metadata_mut::<Tokens>()?;
-                if !token_data.contains(token) {
-                    token_data.add_token(token);
-                }
-            }
-
+        /* Implicitly there must be a difference because the mutator will always mutate something.
+        if original_bytes.as_ref() == mutated_bytes.as_ref() {
+            return Ok(()) // Can't find a token without a mutation
         }
+        */
+
+        let baseline_coverage = self.get_input_coverage(
+            original_input, fuzzer, executor, state, manager)?;
+        let mut lower_bound : usize= 0;
+        let mut upper_bound : usize = 0;
+
+
+        /* add mutations until we get more coverage (move upper bound to the right) */
+        //TODO how do we handle the case when the mutator increased the length of the vector?
+        //Dirty fix:
+        if test_seq.len() < mutated_seq.len() {
+            println!("mutated sequence is longer than test sequence");
+            return Ok(())
+        }
+
+        for i in 0..mutated_seq.len() {
+            test_seq[i] = mutated_seq[i];
+
+            let coverage = self.get_input_coverage(
+                &test_seq.clone().into(),
+                fuzzer, executor, state, manager)?;
+
+            if coverage != baseline_coverage {
+                upper_bound = i;
+                break;
+            }
+        }
+
+        /* remove mutations and check non-mutations from the left (move lower bound to the right) */
+        for i in max(0, upper_bound-MAXTOKENLENGTH)..upper_bound {
+            let tmp = test_seq[i]; // cache current value
+            if test_seq[i] == original_seq[i] {
+                test_seq[i] = 255 // put a random u8 here.
+            } else {
+                test_seq[i] = original_seq[i]
+            }
+            let coverage = self.get_input_coverage(
+                &test_seq.clone().into(),
+                fuzzer, executor, state, manager)?;
+
+            if coverage != baseline_coverage {
+                lower_bound = i;
+                test_seq[i] = tmp; // restore previous value
+                break;
+            }
+        }
+
+        for i in upper_bound+1..min(mutated_seq.len(), lower_bound+MAXTOKENLENGTH) {
+            let tmp = test_seq[i];
+            test_seq[i] = 255; // put a random u8 here
+
+            let coverage = self.get_input_coverage(
+                &test_seq.clone().into(),
+                fuzzer, executor, state, manager)?;
+
+            if coverage != baseline_coverage {
+                upper_bound = i;
+                test_seq[i] = tmp;
+                break;
+            }
+        }
+
+        /* Add the token to the fuzzer */
+        let token_length = upper_bound - lower_bound;
+        if token_length >= MINTOKENLENGTH {
+            let token = test_seq[lower_bound..upper_bound].to_vec();
+            let token_data = state.metadata_mut::<Tokens>()?;
+            if !token_data.contains(&token) {
+                token_data.add_token(&token);
+                println!("Token of length {}B added:", token.len());
+                println!("  Decimal: {:?}", token);
+                println!("  Hex:     {:02x?}", token);
+                let ascii = String::from_utf8_lossy(&token);
+                println!("  ASCII:   {}", ascii);
+            }
+        }
+
         Ok(())
-    }
 
-    /**
-    Determine the indices of the bytes that have been mutated
-    */
-    pub fn search_diff_index(&self, original: &I, mutated: &I) -> Vec<usize> {
-        // find diff between original and mutated
-        let mut diffs = Vec::<usize>::new();
-        let origin_bytes = original.target_bytes();
-        let mutated_bytes = mutated.target_bytes();
-        for (i, bytes) in origin_bytes.iter().zip(mutated_bytes.iter()).enumerate() {
-            let (origin, mutated) = bytes;
-            if origin != mutated {
-                diffs.push(i);
-            }
-        }
-        diffs
     }
 
     /**
@@ -306,28 +297,6 @@ where
         state.add_metadata(Tokens::from(unique.into_boxed_slice()));
     }
 
-    /**
-    Get the current testcase from the corpus if transformation to <I> was successful.
-    */
-    fn current_testcase_as_input(&self, state: &mut S) -> Result<Option<I>, Error> {
-        // transform Testcase<I> containing the input to I
-        let mut testcase = state.current_testcase_mut()?;
-        let Ok(input) = I::try_transform_from(&mut testcase, state) else {
-            return Ok(None);
-        };
-        drop(testcase);
-        Ok(Some(input))
-    }
-
-
-    fn mutated_testcase_as_input(
-        &self,
-        state: &mut S,
-        corpus_id: CorpusId
-    ) -> Result<Option<I>, Error> {
-        let mut mutated_testcase = state.corpus().get(corpus_id)?.borrow_mut();
-        Ok(I::try_transform_from(&mut mutated_testcase, state).ok())
-    }
 
     /**
     Mutate the input and run it once.
@@ -340,7 +309,7 @@ where
         executor: &mut E,
         state: &mut S,
         manager: &mut EM,
-    ) -> Result<Option<CorpusId>, Error>{
+    ) -> Result<Option<CorpusId>, Error> {
 
         // make the input mutable and mutate
         let mutation_result = self.mutator_mut().mutate(state, &mut input)?;
@@ -374,42 +343,38 @@ where
         executor: &mut E,
         state: &mut S,
         manager: &mut EM,
-    ) -> Result<Vec<O::Entry>, Error>{
+    ) -> Result<Vec<O::Entry>, Error> {
 
-        // enclose the reset in own scope for borrow checking
-        {
-            let mut observers = executor.observers_mut();
+        /* reset the observer map */
+        let mut observers = executor.observers_mut();
+        let edge_observer = observers
+            .get_mut(&self.observer_handle)
+            .ok_or_else(|| Error::key_not_found("MapObserver not found".to_string()))?
+            .as_mut();
+        edge_observer.reset_map()?;
+
+        /* run input target */
+        executor.run_target(fuzzer, state, manager, input)?;
+
+        /* observe */
+        let coverage = {
+            let observers = executor.observers();
             let edge_observer = observers
-                .get_mut(&self.observer_handle)
-                .ok_or_else(|| Error::key_not_found("invariant: MapObserver not found".to_string()))?
-                .as_mut();
+                .get(&self.observer_handle)
+                .ok_or_else(|| Error::key_not_found("MapObserver not found".to_string()))?
+                .as_ref();
+            edge_observer.to_vec()
+        };
 
-            // reset to analyze trace between inputs
-            edge_observer.reset_map()?;
-        }
+        Ok(coverage)
 
-        // feedbacks not need analyzing traces
-        let (_, _) = fuzzer.evaluate_filtered(state, executor, manager, input)?;
-        let coverage_map: Vec<_>;
-        {
-            let mut observers = executor.observers_mut();
-            let edge_observer = observers
-                .get_mut(&self.observer_handle)
-                .ok_or_else(|| Error::key_not_found("invariant: MapObserver not found".to_string()))?
-                .as_mut();
-
-            coverage_map = edge_observer.to_vec().clone();
-        }
-
-        Ok(coverage_map)
     }
-
 }
 
 /*
 =========================================================================================================
 */
-impl<E, EM, I, S, M, F, C, Z, O> Restartable<S> for TestStage<E, EM, I, S, M, F, C, Z, O>
+impl<E, EM, I, S, M, F, C, Z, O> Restartable<S> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
 where
     S: HasMetadata + HasNamedMetadata + HasCurrentCorpusId,
 {
@@ -423,7 +388,7 @@ where
     }
 }
 
-impl <E, EM, I, S, M, F, C, Z, O> MutationalStage<S> for TestStage<E, EM, I, S, M, F, C, Z, O>
+impl <E, EM, I, S, M, F, C, Z, O> MutationalStage<S> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
 where
     S: HasCurrentTestcase<I>,
     F: TestcaseScore<I, S>
@@ -452,7 +417,7 @@ where
     }
 }
 
-impl<E, EM, I, S, M, F, C, Z, O> Named for TestStage<E, EM, I, S, M, F, C, Z, O> {
+impl<E, EM, I, S, M, F, C, Z, O> Named for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O> {
     fn name(&self) -> &Cow<'static, str> {
         &self.name
     }

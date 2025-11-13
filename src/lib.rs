@@ -5,7 +5,7 @@ use std::ptr;
 use std::{env, path::PathBuf};
 
 #[cfg(feature = "token_discovery")]
-mod test_stage;
+mod token_discovery_stage;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
@@ -148,10 +148,10 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
 
     #[cfg(feature = "token_discovery")]
     let mut stages = {
-        use test_stage::TestStage;
-        let test_stage: TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _>
-            = TestStage::new(mutator, &edges_observer);
-        tuple_list!(calibration, test_stage)
+        use token_discovery_stage::TokenDiscoveryStage;
+        let token_discovery_stage: TokenDiscoveryStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _>
+            = TokenDiscoveryStage::new(mutator, &edges_observer);
+        tuple_list!(calibration, token_discovery_stage)
     };
 
     #[cfg(not(feature = "token_discovery"))]

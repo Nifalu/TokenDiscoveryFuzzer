@@ -1,4 +1,6 @@
 corpus/
+corpus*/
+*corpus/
 libarchive-*
 crashes/
 crashes_organized/
