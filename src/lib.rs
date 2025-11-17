@@ -7,6 +7,9 @@ use std::{env, path::PathBuf};
 #[cfg(feature = "token_discovery")]
 mod token_discovery_stage;
 
+#[cfg(feature = "smart_tokens")]
+mod smart_token_mutations;
+
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
     events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
@@ -18,12 +21,11 @@ use libafl::{
     monitors::{MultiMonitor, PrometheusMonitor},
     mutators::{
         havoc_mutations::havoc_mutations,
-        scheduled::{tokens_mutations, StdScheduledMutator},
-        token_mutations::Tokens,
+        scheduled::StdScheduledMutator,
     },
     observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
     schedulers::{
-        powersched::PowerSchedule, testcase_score::CorpusPowerTestcaseScore, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
+        powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
     },
     stages::calibrate::CalibrationStage,
     state::{HasCorpus, StdState},
@@ -38,6 +40,14 @@ use libafl_bolts::{
 
 use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
 use mimalloc::MiMalloc;
+
+#[cfg(feature = "smart_tokens")]
+use crate::smart_token_mutations::{SmartTokenInsert, SmartTokenReplace, SmartTokens};
+#[cfg(not(feature = "smart_tokens"))]
+use libafl::mutators::{token_mutations::Tokens, scheduled::tokens_mutations};
+
+#[cfg(feature = "token_discovery")]
+use libafl::schedulers::testcase_score::CorpusPowerTestcaseScore;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -137,19 +147,32 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     println!("We're a client, let's fuzz :)");
 
     // add and initialize needed metadata
+    #[cfg(feature = "smart_tokens")]
+    if state.metadata_map().get::<SmartTokens>().is_none() {
+        state.add_metadata(SmartTokens::new());
+    };
+
+    #[cfg(not(feature = "smart_tokens"))]
     if state.metadata_map().get::<Tokens>().is_none() {
         state.add_metadata(Tokens::new());
     };
 
 
     // Set up a basic mutator with a mutational stage
-
+    #[cfg(feature = "smart_tokens")]
+    let mutator = StdScheduledMutator::new(havoc_mutations().merge(
+        tuple_list!(
+            // Havoc Mutator adds so many mutators, we add more to get a higher usage
+            SmartTokenInsert::new(),
+            SmartTokenReplace::new(),
+        )));
+    
+    #[cfg(not(feature = "smart_tokens"))]
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
 
     #[cfg(feature = "token_discovery")]
-    eprintln!("TOKEN DISCOVERY FEATURE IS ENABLED!");
-    #[cfg(feature = "token_discovery")]
     let mut stages = {
+        eprintln!("TOKEN DISCOVERY FEATURE IS ENABLED!");
         use token_discovery_stage::TokenDiscoveryStage;
         let token_discovery_stage: TokenDiscoveryStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _>
             = TokenDiscoveryStage::new(mutator, &edges_observer);
@@ -157,9 +180,8 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     };
 
     #[cfg(not(feature = "token_discovery"))]
-    eprintln!("TOKEN DISCOVERY FEATURE IS DISABLED!");
-    #[cfg(not(feature = "token_discovery"))]
     let mut stages = {
+        eprintln!("TOKEN DISCOVERY FEATURE IS DISABLED!");
         use libafl::stages::mutational::StdMutationalStage;
         let std_stage = StdMutationalStage::new(mutator);
         tuple_list!(calibration, std_stage)

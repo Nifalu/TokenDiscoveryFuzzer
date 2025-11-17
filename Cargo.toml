@@ -9,7 +9,8 @@ edition = "2021"
 
 [features]
 default = ["std", "token_discovery"]
-token_discovery = []
+token_discovery = ["smart_tokens"]
+smart_tokens = []
 std = []
 # Forces a crash
 crash = []
@@ -35,6 +36,7 @@ libafl_cc = "0.15.2"
 
 log = { version = "0.4.22", features = ["release_max_level_info"] }
 mimalloc = { version = "0.1.43", default-features = false }
+serde = { version = "1.0.228", features = ["derive"] }
 
 [lib]
 name = "fuzzer_framework"

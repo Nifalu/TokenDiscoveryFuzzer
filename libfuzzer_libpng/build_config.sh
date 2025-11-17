@@ -14,21 +14,30 @@ build_library() {
     fi
 }
 
-compile_fuzzer() {
-    $LIBAFL_CXX harness.cc libpng16.a \
+compile_with_token_discovery() {
+    $LIBAFL_CXX_WITH_TOKENS harness.cc libpng16.a \
         -I libpng-1.6.37/ \
         -DLIBPNG_SILENCE_ERRORS \
         -lz -lm \
-        -o fuzz_fuzzer_libpng
+        -o fuzz_libpng_with_token_discovery
+}
+
+compile_without_token_discovery() {
+    $LIBAFL_CXX_WITHOUT_TOKENS harness.cc libpng16.a \
+        -I libpng-1.6.37/ \
+        -DLIBPNG_SILENCE_ERRORS \
+        -lz -lm \
+        -o fuzz_libpng_without_token_discovery
 }
 
 compile_test() {
-    clang++ harness.cc libpng16.a \
+    # Compile with STANDALONE_BUILD flag to enable main function
+    clang++ -DSTANDALONE_BUILD harness.cc libpng16.a \
         -I libpng-1.6.37/ \
         -DLIBPNG_SILENCE_ERRORS \
         -lz -lm \
         -g -fsanitize=address \
-        -o fuzz_test_libpng
+        -o test_libpng
 }
 
 clean_target() {

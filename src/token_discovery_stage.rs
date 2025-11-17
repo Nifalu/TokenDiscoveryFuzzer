@@ -6,7 +6,7 @@ use libafl::{
     events::EventFirer,
     executors::{Executor, HasObservers},
     inputs::HasTargetBytes,
-    mutators::{MutationResult, Mutator, Tokens},
+    mutators::{MutationResult, Mutator},
     observers::MapObserver,
     schedulers::TestcaseScore,
     stages::{mutational::{MutatedTransform, MutatedTransformPost},
@@ -18,6 +18,12 @@ use libafl::{
     HasNamedMetadata
 };
 use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
+
+#[cfg(feature = "smart_tokens")]
+use crate::smart_token_mutations::SmartTokens;
+
+#[cfg(not(feature = "smart_tokens"))]
+use libafl::mutators::Tokens;
 
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
@@ -113,13 +119,23 @@ where
         }
 
         /* print new tokens every N executions of this stage */
-        if self.stage_executions % 1000 == 0 {
-            let token_data = state.metadata_mut::<Tokens>()?;
-            /* Delete all tokens to make room for new ones */
-            if token_data.len() > 100 {
-                println!("\n\n ========================= CLEARED {} TOKENS ========================= \n\n", token_data.len());
-                let empty: Vec<Vec<u8>> = Vec::new();
-                state.add_metadata(Tokens::from(empty));
+        if self.stage_executions % 10_000 == 0 {
+            #[cfg(feature = "smart_tokens")]
+            {
+                let token_data = state.metadata_mut::<SmartTokens>()?;
+                token_data.print_stats();
+            }
+
+
+            #[cfg(not(feature = "smart_tokens"))]
+            {
+                /* Delete all tokens to make room for new ones */
+                let token_data = state.metadata_mut::<Tokens>()?;
+                if token_data.len() > 100 {
+                    println!("\n\n ========================= CLEARED {} TOKENS ========================= \n\n", token_data.len());
+                    let empty: Vec<Vec<u8>> = Vec::new();
+                    state.add_metadata(Tokens::from(empty));
+                }
             }
 
         }
@@ -206,11 +222,17 @@ where
         let mutated_seq = mutated_input.target_bytes().to_vec();
         let mut test_seq = original_seq.clone();
 
+        /* These should implicitly be NOT equal so we don't check equality here.*/
         let baseline_coverage = self.get_input_coverage(
             original_input, fuzzer, executor, state, manager)?;
+        let target_coverage = self.get_input_coverage(
+            &mutated_input, fuzzer, executor, state, manager)?;
+
         let mut lower_bound : usize= 0;
         let mut upper_bound : usize = 0;
 
+        /* AT THIS POINT TEST_SEQ EQUALS ORIGINAL_INPUT */
+        /* we are at baseline coverage and search target coverage */
 
         let test_seq_len = test_seq.len()-1;
         for i in 0..mutated_seq.len() {
@@ -224,12 +246,16 @@ where
                 &test_seq.clone().into(),
                 fuzzer, executor, state, manager)?;
 
-            if coverage != baseline_coverage {
+            if coverage == target_coverage {
                 upper_bound = i+1; // exclusive
                 lower_bound = i; // in case the loop below does not trigger a break
                 break;
             }
         }
+
+        /* AT THIS POINT TEST_SEQ CONTAINS ENOUGH MUTATIONS TO PRODUCE TARGET COVERAGE*/
+        /* we are at target coverage and search how much on the left we revert until  */
+        /* go back to baseline coverage */
 
         /* remove mutations and check non-mutations from the left (move lower bound to the right) */
         for i in upper_bound.saturating_sub(MAXTOKENLENGTH)..upper_bound {
@@ -249,12 +275,15 @@ where
                 &test_seq.clone().into(),
                 fuzzer, executor, state, manager)?;
 
-            if coverage != baseline_coverage {
+            if coverage == baseline_coverage {
                 lower_bound = i;
                 test_seq[i] = tmp; // restore previous value
                 break;
             }
         }
+
+        /* AT THIS POINT WE STILL GOT TARGET COVERAGE */
+        /* We're trying to figure out if bytes to the right of upper bound are relevant */
 
         for i in upper_bound..min(mutated_seq.len(), lower_bound+MAXTOKENLENGTH) {
             if i > test_seq_len {
@@ -268,7 +297,9 @@ where
                 &test_seq.clone().into(),
                 fuzzer, executor, state, manager)?;
 
-            if coverage != baseline_coverage {
+            // if we get target coverage either way, this byte seems to have no effect and is
+            // probably not part of any token
+            if coverage == target_coverage {
                 upper_bound = i;
                 test_seq[i] = tmp;
                 break;
@@ -286,6 +317,8 @@ where
 
     /**
     Adds a Token to the state as long as it's not already in there.
+
+    Note: Deduplication is already done at the SmartTokens metadata map implementation!
     */
     fn add_token(new_token: Vec<u8>, state: &mut S) -> Result<(), Error> {
 
@@ -293,16 +326,14 @@ where
             small.len() < large.len() && large.windows(small.len()).any(|w| w == small)
         }
 
+        #[cfg(feature = "smart_tokens")]
+        let token_data = state.metadata_mut::<SmartTokens>()?;
 
+        #[cfg(not(feature = "smart_tokens"))]
         let token_data = state.metadata_mut::<Tokens>()?;
 
         let mut can_add: bool = true;
         for existing_token in token_data.iter() {
-
-            if existing_token == &new_token {
-                can_add = false;
-                break
-            }
 
             if PREFERLARGERTOKENS && is_subset_of(&new_token, existing_token) {
                 can_add = false;
