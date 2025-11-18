@@ -6,6 +6,8 @@ use std::{env, path::PathBuf};
 
 #[cfg(feature = "token_discovery")]
 mod token_discovery_stage;
+#[cfg(feature = "token_discovery")]
+mod token_mutator;
 
 #[cfg(feature = "smart_tokens")]
 mod smart_token_mutations;
@@ -21,7 +23,6 @@ use libafl::{
     monitors::{MultiMonitor, PrometheusMonitor},
     mutators::{
         havoc_mutations::havoc_mutations,
-        scheduled::StdScheduledMutator,
     },
     observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
     schedulers::{
@@ -44,7 +45,7 @@ use mimalloc::MiMalloc;
 #[cfg(feature = "smart_tokens")]
 use crate::smart_token_mutations::{SmartTokenInsert, SmartTokenReplace, SmartTokens};
 #[cfg(not(feature = "smart_tokens"))]
-use libafl::mutators::{token_mutations::Tokens, scheduled::tokens_mutations};
+use libafl::mutators::{token_mutations::Tokens, scheduled::tokens_mutations, StdScheduledMutator};
 
 #[cfg(feature = "token_discovery")]
 use libafl::schedulers::testcase_score::CorpusPowerTestcaseScore;
@@ -158,15 +159,18 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     };
 
 
-    // Set up a basic mutator with a mutational stage
     #[cfg(feature = "smart_tokens")]
-    let mutator = StdScheduledMutator::new(havoc_mutations().merge(
-        tuple_list!(
-            // Havoc Mutator adds so many mutators, we add more to get a higher usage
+    let mutator = {
+        use crate::token_mutator::TokenPreservingScheduledMutator;
+
+        TokenPreservingScheduledMutator::new(havoc_mutations().merge(
+            tuple_list!(
             SmartTokenInsert::new(),
             SmartTokenReplace::new(),
-        )));
-    
+        )
+        ))
+    };
+
     #[cfg(not(feature = "smart_tokens"))]
     let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
 
@@ -174,8 +178,10 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     let mut stages = {
         eprintln!("TOKEN DISCOVERY FEATURE IS ENABLED!");
         use token_discovery_stage::TokenDiscoveryStage;
+
         let token_discovery_stage: TokenDiscoveryStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _>
             = TokenDiscoveryStage::new(mutator, &edges_observer);
+
         tuple_list!(calibration, token_discovery_stage)
     };
 

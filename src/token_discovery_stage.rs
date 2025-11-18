@@ -21,6 +21,8 @@ use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 
 #[cfg(feature = "smart_tokens")]
 use crate::smart_token_mutations::SmartTokens;
+use std::fs::{OpenOptions};
+use std::io::Write;
 
 #[cfg(not(feature = "smart_tokens"))]
 use libafl::mutators::Tokens;
@@ -31,7 +33,7 @@ pub const STAGE_NAME: &str = "TokenDiscoveryStage";
  Set maximum length a token can have.
  larger values may impact performance
  */
-const MAXTOKENLENGTH: usize = 12; // in bytes
+const MAXTOKENLENGTH: usize = 16; // in bytes
 
 /**
  Set the minimum length a token must have.
@@ -348,6 +350,26 @@ where
 
         if can_add {
             token_data.add_token(&new_token);
+
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("discovered_tokens.txt")
+            {
+                writeln!(
+                    file,
+                    "[Token #{}] Length: {} bytes",
+                    token_data.iter().len(),
+                    new_token.len()
+                ).ok();
+                writeln!(file, "  Decimal: {:?}", new_token).ok();
+                writeln!(file, "  Hex:     {:02x?}", new_token).ok();
+                let ascii = String::from_utf8_lossy(&new_token);
+                writeln!(file, "  ASCII:   {}", ascii).ok();
+                writeln!(file, "").ok();  // Empty line for readability
+            }
+
+
             println!("Token of length {}B added:", new_token.len());
             println!("  Decimal: {:?}", new_token);
             println!("  Hex:     {:02x?}", new_token);

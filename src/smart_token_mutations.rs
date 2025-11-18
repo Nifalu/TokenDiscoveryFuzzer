@@ -134,58 +134,52 @@ impl SmartTokens {
             println!("No tokens to show stats for.");
             return;
         }
-
-        let mut most_used = (0, 0u64);  // (index, uses)
-        let mut least_used = (0, u64::MAX);
-        let mut best_perf = (0, 0.0f64);  // (index, success_rate)
-        let mut worst_perf = (0, f64::MAX);
+        let mut most_used = (0, 0u64, 0u64);  // (index, successes, uses)
+        let mut least_used = (0, 0u64, u64::MAX,);  // (index, successes, uses)
+        let mut most_success = (0, 0u64, 0u64);  // (index, successes, uses)
+        let mut least_success = (0, u64::MAX, 0u64);  // (index, successes, uses)
 
         for (i, stat) in self.stats.iter().enumerate() {
-            // Track most/least used
-            if stat.uses > most_used.1 {
-                most_used = (i, stat.uses);
+            if stat.uses > most_used.2 {
+                most_used = (i, stat.successes, stat.uses);
             }
-            if stat.uses < least_used.1 {
-                least_used = (i, stat.uses);
+            if stat.uses < least_used.2 {
+                least_used = (i, stat.successes, stat.uses);
             }
-
-            // Track best/worst performance (only for tokens with some uses)
-            if stat.uses > 0 {
-                let rate = stat.successes as f64 / stat.uses as f64;
-                if rate > best_perf.1 {
-                    best_perf = (i, rate);
-                }
-                if rate < worst_perf.1 {
-                    worst_perf = (i, rate);
-                }
+            if stat.successes > most_success.1 {
+                most_success = (i, stat.successes, stat.uses);
+            }
+            if stat.successes < least_success.1 {
+                least_success = (i, stat.successes, stat.uses);
             }
         }
 
-        println!("\n========= Token Statistics =========");
-        println!("Total tokens: {}", self.tokens_vec.len());
+        println!("\n== ========= Token Statistics ====================================== Total tokens: {:>5} ========= ==", self.tokens_vec.len());
 
         if let Some(token) = self.tokens_vec.get(most_used.0) {
-            println!("  Most used:            {:?} ({} uses)",
-                     String::from_utf8_lossy(token), most_used.1);
+            println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
+                     "Most used:", most_used.1, most_used.2, String::from_utf8_lossy(token), token);
         }
 
-        if let Some(token) = self.tokens_vec.get(least_used.0) {
-            println!("  Least used:           {:?} ({} uses)",
-                     String::from_utf8_lossy(token), least_used.1);
-        }
-
-        if worst_perf.1 != f64::MAX {
-            if let Some(token) = self.tokens_vec.get(best_perf.0) {
-                println!("  Best performance: {:?} ({:.1}% success)",
-                         String::from_utf8_lossy(token), best_perf.1 * 100.0);
-            }
-
-            if let Some(token) = self.tokens_vec.get(worst_perf.0) {
-                println!("  Worst performance: {:?} ({:.1}% success)",
-                         String::from_utf8_lossy(token), worst_perf.1 * 100.0);
+        if least_used.2 != u64::MAX {
+            if let Some(token) = self.tokens_vec.get(least_used.0) {
+                println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
+                         "Least used:", least_used.1, least_used.2, String::from_utf8_lossy(token), token);
             }
         }
-        println!("====================================\n");
+
+        if let Some(token) = self.tokens_vec.get(most_success.0) {
+            println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
+                     "Most successes:", most_success.1, most_success.2, String::from_utf8_lossy(token), token);
+        }
+
+        if least_success.1 != u64::MAX {
+            if let Some(token) = self.tokens_vec.get(least_success.0) {
+                println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
+                         "Least successes:", least_success.1, least_success.2, String::from_utf8_lossy(token), token);
+            }
+        }
+        println!("== ============================================================================================== ==\n");
     }
 
     /// Gets the tokens stored in this db
