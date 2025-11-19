@@ -86,6 +86,12 @@ impl SmartTokens {
         }
     }
 
+    pub fn add_tokens(&mut self, tokens: &[Vec<u8>]) {
+        for token in tokens {
+            self.add_token(token);
+        }
+    }
+
     /// Determine which tokens to drop whenever the limit is reached.
     fn find_eviction_index(&self) -> Option<usize> {
         // first try to sort out unuseful ones
@@ -131,7 +137,7 @@ impl SmartTokens {
 
     pub fn print_stats(&self) {
         if self.tokens_vec.is_empty() {
-            println!("No tokens to show stats for.");
+            println!("\n=== No tokens to show stats for. ===\n");
             return;
         }
         let mut most_used = (0, 0u64, 0u64);  // (index, successes, uses)
@@ -154,7 +160,7 @@ impl SmartTokens {
             }
         }
 
-        println!("\n== ========= Token Statistics ====================================== Total tokens: {:>5} ========= ==", self.tokens_vec.len());
+        println!("\n== ============== Token Statistics ============================ Total tokens: {:>5} ============== ==", self.tokens_vec.len());
 
         if let Some(token) = self.tokens_vec.get(most_used.0) {
             println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
@@ -179,7 +185,7 @@ impl SmartTokens {
                          "Least successes:", least_success.1, least_success.2, String::from_utf8_lossy(token), token);
             }
         }
-        println!("== ============================================================================================== ==\n");
+        println!("== =============================================================================================== ==\n");
     }
 
     /// Gets the tokens stored in this db
@@ -390,6 +396,14 @@ impl Default for TokenStat {
         }
     }
 }
+
+// Allow sharing of discovered tokens between different clients
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredTokens {
+    pub tokens: Vec<Vec<u8>>,
+}
+libafl_bolts::impl_serdeany!(DiscoveredTokens);
+
 
 
 // ------------- Utilities copied from libafl mutations.rs (private) ------------- //

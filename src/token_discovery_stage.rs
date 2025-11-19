@@ -23,9 +23,9 @@ use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 use crate::smart_token_mutations::SmartTokens;
 use std::fs::{OpenOptions};
 use std::io::Write;
-
 #[cfg(not(feature = "smart_tokens"))]
 use libafl::mutators::Tokens;
+use crate::smart_token_mutations::DiscoveredTokens;
 
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
@@ -92,17 +92,33 @@ where
         manager: &mut EM,
     ) -> Result<(), Error> {
 
-        /* Remove duplicate tokens and get the current testcase (input) */
         self.stage_executions += 1;
 
-
-        let input = {
+        /* get the current testcase and extract appended tokens if there are any */
+        let (input, tokens) = {
             let mut testcase = state.current_testcase_mut()?;
-            match I::try_transform_from(&mut testcase, state).ok() {
+
+            let input = match I::try_transform_from(&mut testcase, state).ok() {
                 Some(i) => i,
                 None => return Ok(()),
-            }
+            };
+
+            let tokens = testcase.metadata::<DiscoveredTokens>()
+                .ok()
+                .map(|meta| meta.tokens.clone());
+
+            (input, tokens)
         };
+
+        if let Some(tokens) = tokens {
+            #[cfg(feature = "smart_tokens")]
+            let token_data = state.metadata_mut::<SmartTokens>()?;
+
+            #[cfg(not(feature = "smart_tokens"))]
+            let token_data = state.metadata_mut::<Tokens>()?;
+
+            token_data.add_tokens(&tokens);
+        }
 
         /* The more interesting the current testcase is, the more often it should be mutated */
         let num_iterations = self.iterations(state)?;
@@ -312,7 +328,17 @@ where
         if token_length >= MINTOKENLENGTH {
             let new_token = test_seq[lower_bound..upper_bound].to_vec();
             assert!(new_token.len() <= MAXTOKENLENGTH, "Token too large... \nupper: {}, \nlower: {}, \nlength: {}", upper_bound, lower_bound, new_token.len());
-            Self::add_token(new_token, state).ok();
+            if Self::add_token(new_token.clone(), state).is_ok() {
+                let mut testcase = state.corpus_mut().get(corpus_id)?.borrow_mut();
+
+                if let Ok(existing) = testcase.metadata_mut::<DiscoveredTokens>() {
+                    existing.tokens.push(new_token);
+                } else {
+                    testcase.add_metadata(DiscoveredTokens {
+                        tokens: vec![new_token],
+                    })
+                }
+            }
         }
         Ok(())
     }
