@@ -4,6 +4,7 @@ corpus*/
 libarchive-*
 crashes/
 crashes_organized/
+fuzz*
 *.o
 *.a
 *.so
