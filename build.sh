@@ -20,15 +20,15 @@ case $ACTION in
         cargo build --release --target-dir target_with_tokens
 
         # Build WITHOUT token discovery in a separate directory
-        echo "Building LibAFL framework without token discovery..."
-        cargo build --release --no-default-features --features std --target-dir target_without_tokens
+        # echo "Building LibAFL framework without token discovery..."
+        # cargo build --release --no-default-features --features std --target-dir target_without_tokens
 
         # Export environment variables pointing to the correct directories
         export LIBAFL_CC_WITH_TOKENS="$(pwd)/target_with_tokens/release/libafl_cc"
         export LIBAFL_CXX_WITH_TOKENS="$(pwd)/target_with_tokens/release/libafl_cxx"
 
-        export LIBAFL_CC_WITHOUT_TOKENS="$(pwd)/target_without_tokens/release/libafl_cc"
-        export LIBAFL_CXX_WITHOUT_TOKENS="$(pwd)/target_without_tokens/release/libafl_cxx"
+        # export LIBAFL_CC_WITHOUT_TOKENS="$(pwd)/target_without_tokens/release/libafl_cc"
+        # export LIBAFL_CXX_WITHOUT_TOKENS="$(pwd)/target_without_tokens/release/libafl_cxx"
 
         # No need for LIBAFL_LIB variables anymore - the wrappers will find them automatically
 
@@ -46,12 +46,12 @@ case $ACTION in
         compile_with_token_discovery
 
         # Build fuzzer WITHOUT token discovery
-        echo "Building fuzzer without token discovery..."
-        compile_without_token_discovery
+        # echo "Building fuzzer without token discovery..."
+        # compile_without_token_discovery
 
         # Build test binary
-        echo "Building test binary..."
-        compile_test
+        # echo "Building test binary..."
+        # compile_test
 
         echo "Build complete!"
         echo "  With tokens:    $TARGET_DIR/fuzz_${TARGET}_with_token_discovery"
