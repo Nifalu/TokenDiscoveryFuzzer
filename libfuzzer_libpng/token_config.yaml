@@ -1,0 +1,29 @@
+# Token Discovery Configuration
+
+# Selection mode: "threshold" or "min_token_count"
+selection_mode: min_token_count
+
+# For threshold mode: minimum fraction of inputs a token must appear in (0.0 - 1.0)
+min_occurrence_ratio: 0.5
+
+# For min_token_count mode: target number of tokens to discover
+min_token_count: 20
+
+# Don't search for tokens until corpus reaches this size
+min_corpus_size: 250
+
+# Run token discovery every N stage executions
+search_interval: 2000
+
+# Token length constraints
+min_token_length: 12
+max_token_length: 64
+
+# Maximum tokens to keep in dictionary
+max_tokens: 2500
+
+# Number of recent corpus entries to analyze
+recent_entries_count: 2500
+
+# Clean tokens (strip control chars, trim whitespace etc.)
+clean_tokens: false

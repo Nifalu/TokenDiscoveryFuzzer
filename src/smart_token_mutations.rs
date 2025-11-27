@@ -4,8 +4,8 @@ use serde::{Serialize, Deserialize};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::num::NonZero;
-use std::slice::Iter;
 use libafl_bolts::rands::Rand;
+use crate::config::config;
 
 #[expect(clippy::unsafe_derive_deserialize)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,13 +27,11 @@ pub struct TokenStat {
 
 /// The metadata used for SmartToken mutators
 impl SmartTokens {
-    /// limit how many tokens we can have
-    const DEFAULT_MAX_TOKENS: usize = 100;
 
     /// Creates a new SmartTokens metadata with default capacity
     #[must_use]
     pub fn new() -> Self {
-        Self::with_capacity(Self::DEFAULT_MAX_TOKENS)
+        Self::with_capacity(config().max_tokens)
     }
 
     /// Creates a new SmartTokens metadata with custom capacity
@@ -132,12 +130,6 @@ impl SmartTokens {
     #[inline]
     pub fn tokens(&self) -> &[Vec<u8>] {
         &self.tokens_vec
-    }
-
-    /// Returns an iterator over the tokens.
-    #[inline]
-    pub fn iter(&self) -> Iter<'_, Vec<u8>> {
-        self.tokens_vec.iter()
     }
 }
 
