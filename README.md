@@ -1,84 +1,48 @@
-# IP6-TokenDiscoveryFuzzer
+# TokenDiscoveryFuzzer
 
-This repository contains the implementation for a **Token-Based Fuzzer**, developed as part of a [bachelor thesis](./IP6_Doku%201.pdf). The work builds on research in [Token-Level Fuzzing](https://www.usenix.org/conference/usenixsecurity21/presentation/salls) and uses the open-source fuzzing framework [LibAFL](https://github.com/AFLplusplus/LibAFL).  
+A LibAFL based Fuzzer that automatically detects *tokens* and adjusts ....
 
-Our focus is on extending the concept of *tokens*—traditionally applied to text-based inputs—to **image formats**. Specifically, we explore how tokenization can be generalized to fuzz binary image-processing libraries such as **libpng** and **libmozjpeg**.
-
-## Getting Started
-
-This repository contains two fuzzers:  
-- **libpng fuzzer**  
-- **libmozjpeg fuzzer**
+## Getting started
 
 ### Prerequisites
-- Linux-based operating system (required for the provided scripts)  
-- [Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) (Rust package manager)  
-- `wget`, `cmake`, `make` installed on your system  
+A `linux` environment with `rust`/`cargo` installed. See the `README`s in the library subfolders for the prerequisites of the individual libraries. (tested on ubuntu 24.04.3, cargo 1.90.0)
 
----
 
-### 1. Running the libpng Fuzzer
-To run the **libpng** fuzzer:
-```bash
-cd libpng
-./run.sh
+### Build the Fuzzer
+The build script builds the cargo project, downloads the given library and compiles it to three binaries. 
+One with token discovery enabled, one without token discovery and one without libAFL to test and verify interesting inputs manually.
+
+- libarchive: `./build.sh libarchive build`
+- libpng: `./build.sh libpng build`
+- libmozjpeg: `./build.sh libmozjpeg build`
+
+The binaries are placed inside the corresponding directories.
+
+### Run the fuzzer
+Open up at least two separate shells and run one of the previously built binary in all of them.
 
 ```
-
-### 2. Running the libmozjpeg Fuzzer
-
-The **libmozjpeg** fuzzer requires downloading and compiling the `libmozjpeg` library before execution.
-
-#### Step 1 — Download libmozjpeg
-```bash
-wget https://github.com/mozilla/mozjpeg/archive/v4.0.3.tar.gz
-tar -xzvf v4.0.3.tar.gz
+cd libfuzzer_libarchive
+./fuzz_libarchive_with_token_discovery
+# or
+./fuzz_libarchive_without_token_discovery
 ```
 
-#### Step 2 — Build the Fuzzer Project
-```bash
-cargo build --release
-```
+### Verify crashes
+If the fuzzer recognizes a program crash, it will store the input used to trigger the crash in `crashes/`. In order to verify or analyse those crash states a third binary is compiled. Just pass the input as parameter.
 
-#### Step 3 — Compile libmozjpeg
-```bash
-cd mozjpeg-4.0.3
-cmake -DBUILD_SHARED_LIBS=OFF \
-      -DCMAKE_C_COMPILER="$(pwd)/../target/release/libafl_cc" \
-      -DCMAKE_CXX_COMPILER="$(pwd)/../target/release/libafl_cxx" \
-      -G "Unix Makefiles" .
-make -j"$(nproc)"
-cd ..
+```
+cd libfuzzer_libarchive
+./test_libarchive crashes/<filename>
 ```
 
 
-#### Step 4 — Link and Build the Fuzzer
-```bash
-./target/release/libafl_cxx ./harness.cc ./mozjpeg-4.0.3/*.a -I ./mozjpeg-4.0.3/ -o fuzzer_mozjpeg
-```
+## Development
 
-#### Step 5 — Run the Fuzzer
-```bash
-./fuzzer_mozjpeg
-```
-
-## Adding Token-Discovery to Your Project
-
-[LibAFL](https://github.com/AFLplusplus/LibAFL) allows you to create **custom stages** for adding analysis or processing steps to your fuzzer.  
-
-To use our token-discovery stage in your project:  
-
-1. **Copy** the file [`test_stage.rs`](./test_stage.rs) into your project's `src` directory.  
-2. **Add the following imports** to your main file:  
-
-```rust
-mod test_stage;
-use test_stage::TestStage;
-```
-
-3. **Initialize the stage** with code like this:  
-
-```rust
-let test_stage: TestStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _> 
-    = TestStage::new(mutator, &edges_observer);
-```
+### Structure:
+The root directory contains the libafl fuzzer (`src/`) and a main `build.sh` script to act as single starting point.
+Each fuzzing target has its own subdirectory consisting of:
+- `corpus/` a folder containing at least one input for the fuzzer to start with.
+- `harness.cc` a harness implementing the `LLVMTestOneInput` function. It will receive the fuzzer inputs and should call interesting library functions.
+- `build_config.sh` a script containing functions to download and build the library and compile it in the three formats discussed earlier. Use build_configs from existing libraries as example. The main build.sh file should call those functions accordingly.
+- `README.md` to document anything relevant for working with the given library.

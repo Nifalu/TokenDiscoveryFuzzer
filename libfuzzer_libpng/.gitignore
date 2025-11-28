@@ -1,9 +1,12 @@
 corpus/
 corpus*/
 *corpus/
-libarchive-*
+*.tar.gz
+*.tar
+test_libpng
 crashes/
 crashes_organized/
+*.txt
 fuzz*
 *.o
 *.a
@@ -12,4 +15,3 @@ fuzz*
 *.dll
 *.exe
 *.bin
-*.txt

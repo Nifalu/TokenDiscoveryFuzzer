@@ -1,0 +1,38 @@
+# Token Discovery Configuration
+
+# Iterative pattern matching passes (executed in order)
+# Each pass runs on the output of the previous pass
+passes:
+  - min_length: 4
+    max_length: 32
+    mode: min_token_count
+    token_count: 50
+
+# Don't search for tokens until corpus reaches this size
+min_corpus_size: 250
+
+# Run token discovery every N stage executions
+search_interval: 2000
+
+# Maximum tokens to keep in dictionary
+max_tokens: 2500
+
+# Number of recent corpus entries to analyze
+recent_entries_count: 2500
+
+# Strip leading/trailing control characters from tokens
+strip_bytes: [
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+  0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+  0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+  0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+  0x7F
+]
+# strip_bytes: [0x00, 0x0A, 0x0D, 0x20]  # null, LF, CR, space
+# strip_bytes: []
+
+# Max ratio of null bytes allowed (0.0-1.0), omit to disable
+max_null_ratio: 0.5
+
+# Remove tokens that are substrings of longer tokens
+remove_substrings: false

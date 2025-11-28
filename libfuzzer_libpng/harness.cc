@@ -204,3 +204,48 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   PNG_CLEANUP
   return 0;
 }
+
+
+#ifdef STANDALONE_BUILD
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <input_file>\n", argv[0]);
+        return 1;
+    }
+
+    FILE *f = fopen(argv[1], "rb");
+    if (!f) {
+        perror("Failed to open input file");
+        return 1;
+    }
+
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    uint8_t *data = (uint8_t *)malloc(size);
+    if (!data) {
+        fprintf(stderr, "Failed to allocate memory\n");
+        fclose(f);
+        return 1;
+    }
+
+    if (fread(data, 1, size, f) != size) {
+        perror("Failed to read file");
+        free(data);
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+
+    printf("Testing with input of size %zu bytes\n", size);
+    int result = LLVMFuzzerTestOneInput(data, size);
+    printf("Test completed with result: %d\n", result);
+
+    free(data);
+    return 0;
+}
+#endif
