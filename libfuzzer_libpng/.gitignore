@@ -1,0 +1,17 @@
+corpus/
+corpus*/
+*corpus/
+*.tar.gz
+*.tar
+test_libpng
+crashes/
+crashes_organized/
+*.txt
+fuzz*
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.bin

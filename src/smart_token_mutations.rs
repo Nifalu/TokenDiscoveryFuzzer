@@ -4,8 +4,8 @@ use serde::{Serialize, Deserialize};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::num::NonZero;
-use std::slice::Iter;
 use libafl_bolts::rands::Rand;
+use crate::config::config;
 
 #[expect(clippy::unsafe_derive_deserialize)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,13 +27,11 @@ pub struct TokenStat {
 
 /// The metadata used for SmartToken mutators
 impl SmartTokens {
-    /// limit how many tokens we can have
-    const DEFAULT_MAX_TOKENS: usize = 100;
 
     /// Creates a new SmartTokens metadata with default capacity
     #[must_use]
     pub fn new() -> Self {
-        Self::with_capacity(Self::DEFAULT_MAX_TOKENS)
+        Self::with_capacity(config().max_tokens)
     }
 
     /// Creates a new SmartTokens metadata with custom capacity
@@ -65,7 +63,6 @@ impl SmartTokens {
         if self.tokens_set.contains(token) {
             return None;
         }
-
         if self.tokens_vec.len() < self.max_tokens {
             self.tokens_vec.push(token.clone());
             self.tokens_set.insert(token.clone());
@@ -83,12 +80,6 @@ impl SmartTokens {
                 },
                 None => None // reject new token
             }
-        }
-    }
-
-    pub fn add_tokens(&mut self, tokens: &[Vec<u8>]) {
-        for token in tokens {
-            self.add_token(token);
         }
     }
 
@@ -125,6 +116,7 @@ impl SmartTokens {
     }
 
     /// record the use of a token
+    #[inline]
     pub fn update_stats(&mut self, idx: usize, success: bool) {
         if let Some(stat) = self.stats.get_mut(idx) {
             stat.uses += 1;
@@ -134,69 +126,10 @@ impl SmartTokens {
         }
     }
 
-
-    pub fn print_stats(&self) {
-        if self.tokens_vec.is_empty() {
-            println!("\n=== No tokens to show stats for. ===\n");
-            return;
-        }
-        let mut most_used = (0, 0u64, 0u64);  // (index, successes, uses)
-        let mut least_used = (0, 0u64, u64::MAX,);  // (index, successes, uses)
-        let mut most_success = (0, 0u64, 0u64);  // (index, successes, uses)
-        let mut least_success = (0, u64::MAX, 0u64);  // (index, successes, uses)
-
-        for (i, stat) in self.stats.iter().enumerate() {
-            if stat.uses > most_used.2 {
-                most_used = (i, stat.successes, stat.uses);
-            }
-            if stat.uses < least_used.2 {
-                least_used = (i, stat.successes, stat.uses);
-            }
-            if stat.successes > most_success.1 {
-                most_success = (i, stat.successes, stat.uses);
-            }
-            if stat.successes < least_success.1 {
-                least_success = (i, stat.successes, stat.uses);
-            }
-        }
-
-        println!("\n== ============== Token Statistics ============================ Total tokens: {:>5} ============== ==", self.tokens_vec.len());
-
-        if let Some(token) = self.tokens_vec.get(most_used.0) {
-            println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
-                     "Most used:", most_used.1, most_used.2, String::from_utf8_lossy(token), token);
-        }
-
-        if least_used.2 != u64::MAX {
-            if let Some(token) = self.tokens_vec.get(least_used.0) {
-                println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
-                         "Least used:", least_used.1, least_used.2, String::from_utf8_lossy(token), token);
-            }
-        }
-
-        if let Some(token) = self.tokens_vec.get(most_success.0) {
-            println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
-                     "Most successes:", most_success.1, most_success.2, String::from_utf8_lossy(token), token);
-        }
-
-        if least_success.1 != u64::MAX {
-            if let Some(token) = self.tokens_vec.get(least_success.0) {
-                println!("  {:20} {:>7} successes, {:>10} uses {:?} | {:02x?}",
-                         "Least successes:", least_success.1, least_success.2, String::from_utf8_lossy(token), token);
-            }
-        }
-        println!("== =============================================================================================== ==\n");
-    }
-
     /// Gets the tokens stored in this db
-    #[must_use]
+    #[inline]
     pub fn tokens(&self) -> &[Vec<u8>] {
         &self.tokens_vec
-    }
-
-    /// Returns an iterator over the tokens.
-    pub fn iter(&self) -> Iter<'_, Vec<u8>> {
-        self.tokens_vec.iter()
     }
 }
 

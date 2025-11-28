@@ -25,6 +25,7 @@ debug = true
 [build-dependencies]
 
 [dependencies]
+libsais = { version = "0.2", default-features = false }
 libafl = {version = "=0.15.2", features = ["default", "prometheus_monitor", "statsd_monitor"]}
 libafl_bolts = "=0.15.2"
 libafl_targets = { version = "=0.15.2", features = [
@@ -37,6 +38,7 @@ libafl_cc = "0.15.2"
 log = { version = "0.4.22", features = ["release_max_level_info"] }
 mimalloc = { version = "0.1.43", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"
 
 [lib]
 name = "fuzzer_framework"

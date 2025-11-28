@@ -12,3 +12,4 @@ fuzz*
 *.dll
 *.exe
 *.bin
+*.txt
