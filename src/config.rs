@@ -13,43 +13,72 @@ pub enum SelectionMode {
     MinTokenCount,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct PatternPass {
+    pub min_length: usize,
+    pub max_length: usize,
+    pub mode: SelectionMode,
+    #[serde(default)]
+    pub threshold: f64,
+    #[serde(default)]
+    pub token_count: usize,
+}
+
+impl PatternPass {
+    pub fn selection_mode(&self) -> TokenSelectionMode {
+        match self.mode {
+            SelectionMode::Threshold => TokenSelectionMode::Threshold(self.threshold),
+            SelectionMode::MinTokenCount => TokenSelectionMode::MinTokenCount(self.token_count),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(default)]
 pub struct TokenDiscoveryConfig {
-    pub selection_mode: SelectionMode,
-    pub min_occurrence_ratio: f64,
-    pub min_token_count: usize,
+    pub passes: Vec<PatternPass>,
     pub min_corpus_size: usize,
     pub search_interval: u32,
-    pub min_token_length: usize,
-    pub max_token_length: usize,
     pub max_tokens: usize,
     pub recent_entries_count: usize,
-    pub clean_tokens: bool,
+    pub strip_bytes: Vec<u8>,
+    pub max_null_ratio: Option<f64>,
+    pub remove_substrings: bool,
 }
 
 impl Default for TokenDiscoveryConfig {
     fn default() -> Self {
         Self {
-            selection_mode: SelectionMode::default(),
-            min_occurrence_ratio: 0.25,
-            min_token_count: 50,
-            min_corpus_size: 100,
-            search_interval: 1000,
-            min_token_length: 3,
-            max_token_length: 64,
-            max_tokens: 100,
-            recent_entries_count: 1000,
-            clean_tokens: false,
-        }
-    }
-}
-
-impl TokenDiscoveryConfig {
-    pub fn token_selection_mode(&self) -> TokenSelectionMode {
-        match self.selection_mode {
-            SelectionMode::Threshold => TokenSelectionMode::Threshold(self.min_occurrence_ratio),
-            SelectionMode::MinTokenCount => TokenSelectionMode::MinTokenCount(self.min_token_count),
+            passes: vec![
+                PatternPass {
+                    min_length: 32,
+                    max_length: 64,
+                    mode: SelectionMode::MinTokenCount,
+                    threshold: 0.0,
+                    token_count: 50,
+                },
+                PatternPass {
+                    min_length: 16,
+                    max_length: 64,
+                    mode: SelectionMode::Threshold,
+                    threshold: 0.4,
+                    token_count: 0,
+                },
+                PatternPass {
+                    min_length: 4,
+                    max_length: 64,
+                    mode: SelectionMode::Threshold,
+                    threshold: 0.3,
+                    token_count: 0,
+                },
+            ],
+            min_corpus_size: 250,
+            search_interval: 2000,
+            max_tokens: 2500,
+            recent_entries_count: 2500,
+            strip_bytes: (0x00..=0x1F).chain(std::iter::once(0x7F)).collect(),  // control chars
+            max_null_ratio: Some(0.1),
+            remove_substrings: true,
         }
     }
 }

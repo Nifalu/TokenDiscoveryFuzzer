@@ -20,7 +20,7 @@ use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 
 use crate::smart_token_mutations::SmartTokens;
 use crate::common_substring_discovery::find_common_substrings;
-use crate::config::config;
+use crate::config::{config, TokenDiscoveryConfig};
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
 pub struct TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>{
@@ -65,8 +65,6 @@ where
 
         self.stage_executions += 1;
 
-        /* get the current testcase and extract appended tokens if there are any */
-        //TODO: We share tokens with testcases but we dont retrieve them here.
         let input = {
             let mut testcase = state.current_testcase_mut()?;
             let input = match I::try_transform_from(&mut testcase, state).ok() {
@@ -76,15 +74,12 @@ where
             input
         };
 
-        /* The more interesting the current testcase is, the more often it should be mutated */
         let num_iterations = self.iterations(state)?;
 
-        /* Apply mutations to the input and extend the corpus with interesting mutations */
         let mut interesting_corpora: HashSet<CorpusId> = HashSet::new();
         for _ in 0..num_iterations {
-            /* Each mutation is run against the fuzzing target */
             let corpus_id = self.mutate_and_evaluate(input.clone(), fuzzer, executor, state, manager)?;
-            interesting_corpora.extend(corpus_id); // Iterator won't push None values
+            interesting_corpora.extend(corpus_id);
         }
 
         fn n_recent_corpus_entries<C, I>(corpus: &C, n: usize) -> Vec<Vec<u8>>
@@ -94,7 +89,7 @@ where
         {
             corpus
                 .ids()
-                .rev()  // Start from last (most recent)
+                .rev()
                 .take(n)
                 .filter_map(|id| {
                     corpus.cloned_input_for_id(id)
@@ -109,55 +104,26 @@ where
             if state.corpus().count() > cfg.min_corpus_size {
                 let sequences = n_recent_corpus_entries(state.corpus(), cfg.recent_entries_count);
 
-                let result = find_common_substrings(
-                    &sequences,
-                    cfg.min_token_length,
-                    cfg.max_token_length,
-                    cfg.token_selection_mode(),
-                );
+                let Some(tokens) = self.iterative_token_discovery(&sequences, &cfg) else {
+                    return Ok(());
+                };
 
-                if let Some(result) = result {
-                    if !result.tokens.is_empty() {
-                        // 1. Strip control characters
-                        let cleaned: Vec<Vec<u8>> = result.tokens
-                            .into_iter()
-                            .map(|t| {
-                                if cfg.clean_tokens {
-                                    self.clean_tokens(&t)
-                                } else {
-                                    t
-                                }
-                            })
-                            .filter(|t| t.len() >= cfg.min_token_length)
-                            .collect();
+                if tokens.is_empty() {
+                    return Ok(());
+                }
 
-                        // 2. Remove substrings (keeps longest)
-                        let mut deduped = self.remove_substrings(cleaned);
-
-                        // 3. Sort by length (longest first) for display
-                        deduped.sort_by(|a, b| b.len().cmp(&a.len()));
-
-                        // 4. Add tokens
-                        if let Ok(token_meta) = state.metadata_mut::<SmartTokens>() {
-                            for token in &deduped {
-                                token_meta.add_token(token);
-                            }
-                        }
-
-                        println!(
-                            "Discovered {} tokens (threshold: {:.1}%, {} of {} inputs):",
-                            deduped.len(),
-                            result.threshold_percentage * 100.0,
-                            result.threshold_absolute,
-                            sequences.len()
-                        );
-                        for token in deduped.iter().take(25) {
-                            println!("  [{:2}] {:?} | {:02x?}", token.len(), String::from_utf8_lossy(token), token);
-                        }
-                        if deduped.len() > 25 {
-                            println!("  ... and {} more", deduped.len() - 25);
-                        }
+                if let Ok(token_meta) = state.metadata_mut::<SmartTokens>() {
+                    for token in &tokens {
+                        token_meta.add_token(token);
                     }
+                }
+
+                println!("Final: {} tokens after iterative discovery:", tokens.len());
+                for token in tokens.iter().take(25) {
+                    println!("  [{:2}] {:?} | {:02x?}", token.len(), String::from_utf8_lossy(token), token);
+                }
+                if tokens.len() > 25 {
+                    println!("  ... and {} more", tokens.len() - 25);
                 }
             }
         }
@@ -203,39 +169,60 @@ where
         }
     }
 
-    fn clean_tokens(
+
+    pub fn iterative_token_discovery(
         &mut self,
-        token: &[u8]) -> Vec<u8>
-    {
-        let is_control = |b: &u8| *b < 0x20 || *b == 0x7F;
-
-        let start = token.iter().position(|b| !is_control(b)).unwrap_or(token.len());
-        let end = token.iter().rposition(|b| !is_control(b)).map(|i| i + 1).unwrap_or(0);
-
-        if start < end {
-            token[start..end].to_vec()
-        } else {
-            Vec::new()
+        initial_corpus: &[Vec<u8>],
+        cfg: &TokenDiscoveryConfig
+    ) -> Option<Vec<Vec<u8>>> {
+        if cfg.passes.is_empty() || initial_corpus.is_empty() {
+            return None;
         }
-    }
 
-    fn remove_substrings(
-        &mut self,
-        tokens: Vec<Vec<u8>>) -> Vec<Vec<u8>>
-    {
-        let mut sorted = tokens;
-        sorted.sort_by(|a, b| b.len().cmp(&a.len())); // longest first
+        let mut current_data = initial_corpus.to_vec();
 
-        let mut result: Vec<Vec<u8>> = Vec::new();
-        for token in sorted {
-            let is_substring = result.iter().any(|existing|
-                existing.windows(token.len()).any(|w| w == token.as_slice())
+        for (i, pass) in cfg.passes.iter().enumerate() {
+            let result = find_common_substrings(
+                &current_data,
+                pass.min_length,
+                pass.max_length,
+                pass.selection_mode(),
+                &cfg.strip_bytes,
+                cfg.max_null_ratio,
+                cfg.remove_substrings
+            )?;
+
+            println!(
+                "Pass {}: Refined from {} -> {} tokens (len {}-{}, threshold: {:.1}%, min {}/{} inputs)",
+                i + 1,
+                current_data.len(),
+                result.tokens.len(),
+                pass.min_length,
+                pass.max_length,
+                result.threshold_percentage * 100.0,
+                result.threshold_absolute,
+                current_data.len()
             );
-            if !is_substring {
-                result.push(token);
+
+            for token in result.tokens.iter().take(25) {
+                //println!("  [{:2}] {:?} | {:02x?}", token.len(), String::from_utf8_lossy(token), token);
+                println!("  [{:2}] {:?}", token.len(), String::from_utf8_lossy(token));
             }
+            if result.tokens.len() > 25 {
+                println!("  ... and {} more\n", result.tokens.len() - 25);
+            } else {
+                println!();
+            }
+
+
+            if result.tokens.is_empty() {
+                return None;
+            }
+
+            current_data = result.tokens;
         }
-        result
+
+        Some(current_data)
     }
 
 

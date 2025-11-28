@@ -15,11 +15,58 @@ pub struct TokenDiscoveryResult {
     pub threshold_absolute: usize,
 }
 
+fn clean_token(token: &[u8], strip_bytes: &[u8]) -> Option<Vec<u8>> {
+    let should_strip = |b: &u8| strip_bytes.contains(b);
+    let start = token.iter().position(|b| !should_strip(b))?;
+    let end = token.iter().rposition(|b| !should_strip(b)).map(|i| i + 1)?;
+    if start < end {
+        Some(token[start..end].to_vec())
+    } else {
+        None
+    }
+}
+
+fn has_too_many_nulls(token: &[u8], max_ratio: f64) -> bool {
+    let null_count = token.iter().filter(|&&b| b == 0).count();
+    (null_count as f64 / token.len() as f64) > max_ratio
+}
+
+fn remove_substrings(tokens: Vec<Vec<u8>>) -> Option<Vec<Vec<u8>>> {
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let original_len = tokens.len();
+    let mut sorted = tokens;
+    sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+
+    let mut result: Vec<Vec<u8>> = Vec::new();
+    for token in sorted {
+        let is_substring = result.iter().any(|existing|
+            existing.windows(token.len()).any(|w| w == token.as_slice())
+        );
+        if !is_substring {
+            result.push(token);
+        }
+    }
+
+    println!("Removed {} substrings from tokens.", original_len - result.len());
+
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
 pub fn find_common_substrings(
     corpus: &[Vec<u8>],
     min_len: usize,
     max_len: usize,
     mode: TokenSelectionMode,
+    strip_bytes: &[u8],
+    max_null_ratio: Option<f64>,
+    remove_subs: bool,
 ) -> Option<TokenDiscoveryResult> {
     if corpus.is_empty() {
         return None;
@@ -114,7 +161,43 @@ pub fn find_common_substrings(
 
     let lcp_scan_time = start.elapsed();
 
-    // 4. Select tokens based on mode
+    // 4. Optionally clean tokens before selection
+    let start = Instant::now();
+    let mut token_candidates: Vec<(Vec<u8>, usize)> = token_candidates
+        .into_iter()
+        .filter_map(|(t, count)| {
+            let cleaned = if strip_bytes.is_empty() {
+                t
+            } else {
+                clean_token(&t, strip_bytes)?
+            };
+
+            if cleaned.len() < min_len {
+                return None;
+            }
+
+            if let Some(max) = max_null_ratio {
+                if has_too_many_nulls(&cleaned, max) {
+                    return None;
+                }
+            }
+
+            Some((cleaned, count))
+        })
+        .collect();
+
+    if remove_subs {
+        let tokens_only: Vec<Vec<u8>> = token_candidates.iter().map(|(t, _)| t.clone()).collect();
+        if let Some(deduped) = remove_substrings(tokens_only) {
+            let deduped_set: std::collections::HashSet<&[u8]> = deduped.iter().map(|t| t.as_slice()).collect();
+            token_candidates.retain(|(t, _)| deduped_set.contains(t.as_slice()));
+        }
+    }
+
+    let cleaning_time = start.elapsed();
+
+    // 5. Select tokens based on mode
+    let start = Instant::now();
     let (tokens, threshold_absolute): (HashSet<Vec<u8>>, usize) = match mode {
         TokenSelectionMode::Threshold(t) => {
             let min_inputs = ((corpus.len() as f64) * t).ceil() as usize;
@@ -147,24 +230,20 @@ pub fn find_common_substrings(
     };
 
     let threshold_percentage = threshold_absolute as f64 / corpus.len() as f64;
+    let selection_time = start.elapsed();
 
     // print all timings in one line
     println!(
-        "Token Discovery: concat {:?} ({} bytes), SA {:?}, PLCP {:?}, LCP {:?}, scan {:?}, total {:?}",
+        "[SAIS Timings]: concat {:?} ({} bytes), SA {:?}, PLCP {:?}, LCP {:?}, scan {:?}, clean {:?}, select {:?}, total {:?}",
         concatenation_time,
         concat.len(),
         sa_construction_time,
         plcp_construction_time,
         lcp_construction_time,
         lcp_scan_time,
+        cleaning_time,
+        selection_time,
         total_start.elapsed()
-    );
-    println!(
-        "Selected {} tokens (threshold: {:.1}%, min {} of {} inputs)",
-        tokens.len(),
-        threshold_percentage * 100.0,
-        threshold_absolute,
-        corpus.len()
     );
 
     Some(TokenDiscoveryResult {
