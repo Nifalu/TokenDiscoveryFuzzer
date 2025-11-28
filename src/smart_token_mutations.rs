@@ -82,6 +82,12 @@ impl SmartTokens {
             }
         }
     }
+    
+    pub fn add_tokens(&mut self, tokens: &[Vec<u8>]) {
+        for token in tokens {
+            let _ = self.add_token(token);
+        }
+    }
 
     /// Determine which tokens to drop whenever the limit is reached.
     fn find_eviction_index(&self) -> Option<usize> {

@@ -1,13 +1,13 @@
-use std::{borrow::Cow, collections::HashSet, marker::PhantomData};
+use std::{borrow::Cow, marker::PhantomData};
 use libafl::{
-    corpus::{Corpus, CorpusId, HasCurrentCorpusId},
+    corpus::HasCurrentCorpusId,
     events::EventFirer,
     executors::{Executor, HasObservers},
     inputs::HasTargetBytes,
-    mutators::{MutationResult, Mutator},
+    mutators::{Mutator},
     observers::MapObserver,
     schedulers::TestcaseScore,
-    stages::{mutational::{MutatedTransform, MutatedTransformPost},
+    stages::{mutational::{MutatedTransform},
              MutationalStage, Restartable, RetryCountRestartHelper, Stage},
     state::{HasCorpus, HasCurrentTestcase, HasExecutions, HasRand, MaybeHasClientPerfMonitor},
     Error,
@@ -19,16 +19,16 @@ use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 
 
 use crate::smart_token_mutations::SmartTokens;
-use crate::common_substring_discovery::find_common_substrings;
 use crate::config::{config, TokenDiscoveryConfig};
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
 pub struct TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>{
     name: Cow<'static, str>,
     mutator: M,
-    stage_executions: u32, // how many times this stage has been called/executed
     _observer_handle: Handle<C>,
-    phantom: PhantomData<(E, EM, I, S, F, Z, O)>
+    phantom: PhantomData<(E, EM, I, S, F, Z, O)>,
+    stage_executions: u32, // how many times this stage has been called/executed
+    cfg: &'static TokenDiscoveryConfig,
 }
 
 impl<E, EM, I, S, M, F, C, Z, O> Stage<E, EM, S, Z> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
@@ -63,70 +63,28 @@ where
         manager: &mut EM,
     ) -> Result<(), Error> {
 
+        // Only perform the stage every N executions
         self.stage_executions += 1;
-
-        let input = {
-            let mut testcase = state.current_testcase_mut()?;
-            let input = match I::try_transform_from(&mut testcase, state).ok() {
-                Some(i) => i,
-                None => return Ok(()),
-            };
-            input
-        };
-
-        let num_iterations = self.iterations(state)?;
-
-        let mut interesting_corpora: HashSet<CorpusId> = HashSet::new();
-        for _ in 0..num_iterations {
-            let corpus_id = self.mutate_and_evaluate(input.clone(), fuzzer, executor, state, manager)?;
-            interesting_corpora.extend(corpus_id);
+        if self.stage_executions % self.cfg.search_interval != 0 {
+            return Ok(())
         }
 
-        fn n_recent_corpus_entries<C, I>(corpus: &C, n: usize) -> Vec<Vec<u8>>
-        where
-            C: Corpus<I>,
-            I: HasTargetBytes + Clone,
-        {
-            corpus
-                .ids()
-                .rev()
-                .take(n)
-                .filter_map(|id| {
-                    corpus.cloned_input_for_id(id)
-                        .ok()
-                        .map(|input| input.target_bytes().to_vec())
-                })
-                .collect()
-        }
+        // Discovery Tokens depending on the configured strategy
+        // This allows to easily switch between strategies without recompiling
+        let tokens = self.cfg.strategy.discover_tokens::<E, EM, I, S, M, F, C, Z, O>(
+            fuzzer, executor, state, manager,
+        );
 
-        let cfg = config();
-        if self.stage_executions % cfg.search_interval == 0 {
-            if state.corpus().count() > cfg.min_corpus_size {
-                let sequences = n_recent_corpus_entries(state.corpus(), cfg.recent_entries_count);
-
-                let Some(tokens) = self.iterative_token_discovery(&sequences, &cfg) else {
-                    return Ok(());
-                };
-
-                if tokens.is_empty() {
-                    return Ok(());
-                }
-
+        // Add discovered tokens to the SmartTokens metadata
+        match tokens {
+            Some(t) => {
                 if let Ok(token_meta) = state.metadata_mut::<SmartTokens>() {
-                    for token in &tokens {
-                        token_meta.add_token(token);
-                    }
+                    token_meta.add_tokens(&t);
                 }
-
-                println!("Final: {} tokens after iterative discovery:", tokens.len());
-                for token in tokens.iter().take(25) {
-                    println!("  [{:2}] {:?} | {:02x?}", token.len(), String::from_utf8_lossy(token), token);
-                }
-                if tokens.len() > 25 {
-                    println!("  ... and {} more", tokens.len() - 25);
-                }
-            }
+            },
+            None => return Ok(())
         }
+
         Ok(())
     }
 }
@@ -163,105 +121,11 @@ where
         Self {
             mutator,
             name: Cow::Owned(STAGE_NAME.to_owned()),
-            stage_executions: 0,
             _observer_handle: observer.handle(),
             phantom: PhantomData,
+            stage_executions: 0,
+            cfg: config()
         }
-    }
-
-
-    pub fn iterative_token_discovery(
-        &mut self,
-        initial_corpus: &[Vec<u8>],
-        cfg: &TokenDiscoveryConfig
-    ) -> Option<Vec<Vec<u8>>> {
-        if cfg.passes.is_empty() || initial_corpus.is_empty() {
-            return None;
-        }
-
-        let mut current_data = initial_corpus.to_vec();
-
-        for (i, pass) in cfg.passes.iter().enumerate() {
-            let result = find_common_substrings(
-                &current_data,
-                pass.min_length,
-                pass.max_length,
-                pass.selection_mode(),
-                &cfg.strip_bytes,
-                cfg.max_null_ratio,
-                cfg.remove_substrings
-            )?;
-
-            println!(
-                "Pass {}: Refined from {} -> {} tokens (len {}-{}, threshold: {:.1}%, min {}/{} inputs)",
-                i + 1,
-                current_data.len(),
-                result.tokens.len(),
-                pass.min_length,
-                pass.max_length,
-                result.threshold_percentage * 100.0,
-                result.threshold_absolute,
-                current_data.len()
-            );
-
-            for token in result.tokens.iter().take(25) {
-                //println!("  [{:2}] {:?} | {:02x?}", token.len(), String::from_utf8_lossy(token), token);
-                println!("  [{:2}] {:?}", token.len(), String::from_utf8_lossy(token));
-            }
-            if result.tokens.len() > 25 {
-                println!("  ... and {} more\n", result.tokens.len() - 25);
-            } else {
-                println!();
-            }
-
-
-            if result.tokens.is_empty() {
-                return None;
-            }
-
-            current_data = result.tokens;
-        }
-
-        Some(current_data)
-    }
-
-
-    /**
-    Mutate the input and run it once.
-    If it was interesting, add it as new testcase to the corpus and return the id
-    */
-    fn mutate_and_evaluate(
-        &mut self,
-        mut input: I,
-        fuzzer: &mut Z,
-        executor: &mut E,
-        state: &mut S,
-        manager: &mut EM,
-    ) -> Result<Option<CorpusId>, Error> {
-
-        // make the input mutable and mutate
-        let mutation_result = self.mutator_mut().mutate(state, &mut input)?;
-
-        if mutation_result == MutationResult::Skipped {
-            return Ok(None);
-        }
-
-        // Pretty sure this does nothing when running with ByteInput...?
-        let (untransformed, post) = input.try_transform_into(state)?;
-
-        // check if mutated input is interesting
-        let evaluation = fuzzer.evaluate_filtered(state, executor, manager, &untransformed)?;
-        let (exec_result, corpus_id) = evaluation;
-
-        if exec_result.is_solution() {
-            println!("Found new solution persisting on disk");
-        }
-
-        // check for post process in the fuzzer
-        self.mutator_mut().post_exec(state, corpus_id)?;
-        post.post_exec(state, corpus_id)?;
-
-        Ok(corpus_id)
     }
 }
 

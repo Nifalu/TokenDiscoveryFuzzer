@@ -13,6 +13,7 @@ mod token_mutator;
 mod smart_token_mutations;
 mod common_substring_discovery;
 mod config;
+mod strategies;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
