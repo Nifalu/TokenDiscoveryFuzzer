@@ -15,20 +15,20 @@ use libafl::{
     HasMetadata,
     HasNamedMetadata
 };
+use libafl::corpus::Corpus;
 use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
 
 
 use crate::smart_token_mutations::SmartTokens;
-use crate::config::{config, TokenDiscoveryConfig};
+use crate::config::config;
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
 pub struct TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>{
     name: Cow<'static, str>,
     mutator: M,
-    _observer_handle: Handle<C>,
+    observer_handle: Handle<C>,
     phantom: PhantomData<(E, EM, I, S, F, Z, O)>,
-    stage_executions: u32, // how many times this stage has been called/executed
-    cfg: &'static TokenDiscoveryConfig,
+    stage_executions: u32,
 }
 
 impl<E, EM, I, S, M, F, C, Z, O> Stage<E, EM, S, Z> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
@@ -63,18 +63,21 @@ where
         manager: &mut EM,
     ) -> Result<(), Error> {
 
-        // Only perform the stage every N executions
+        let cfg = config();
+
+        // Only perform the stage every N executions and ensure minimum corpus size
         self.stage_executions += 1;
-        if self.stage_executions % self.cfg.search_interval != 0 {
+        if self.stage_executions % cfg.search_interval != 0
+            || cfg.min_corpus_size > state.corpus().count() {
             return Ok(())
         }
 
         // Discovery Tokens depending on the configured strategy
         // This allows to easily switch between strategies without recompiling
-        let tokens = self.cfg.strategy.discover_tokens::<E, EM, I, S, M, F, C, Z, O>(
-            fuzzer, executor, state, manager,
+        let tokens = cfg.strategy.discover_tokens::<E, EM, I, S, M, F, C, Z, O>(
+            fuzzer, executor, state, manager, &mut self.mutator, &self.observer_handle
         );
-
+        
         // Add discovered tokens to the SmartTokens metadata
         match tokens {
             Some(t) => {
@@ -121,10 +124,9 @@ where
         Self {
             mutator,
             name: Cow::Owned(STAGE_NAME.to_owned()),
-            _observer_handle: observer.handle(),
+            observer_handle: observer.handle(),
             phantom: PhantomData,
             stage_executions: 0,
-            cfg: config()
         }
     }
 }

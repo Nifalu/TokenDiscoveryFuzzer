@@ -8,9 +8,7 @@ authors = [
 edition = "2021"
 
 [features]
-default = ["std", "token_discovery"]
-token_discovery = ["smart_tokens"]
-smart_tokens = []
+default = ["std"]
 std = []
 # Forces a crash
 crash = []
