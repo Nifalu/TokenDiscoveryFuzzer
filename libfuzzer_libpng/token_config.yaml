@@ -1,26 +1,43 @@
-# General settings
+# Main preset
+# Options: baseline, standard_tokens, preserving_tokens, standard_tokens_plus, preserving_tokens_plus
+fuzzer_preset: preserving_tokens
+
+# Scheduler preset
+# Options: fast, explore, exploit, coe, lin, quad
+scheduler_preset: fast
+
+# Paths
+corpus_dir: "./corpus"
+crashes_dir: "./crashes"
+
+# Fuzzer settings
+broker_port: 1337
+timeout_secs: 8
+fuzz_loop_for: 1000000
+
+# Token discovery settings
 min_corpus_size: 250
-search_interval: 2000
+search_interval: 1000
 max_tokens: 2500
-recent_entries_count: 2500
+max_token_length: 64
+min_token_length: 4
+search_pool_size: 2500
+
+# SAIS settings
+strip_bytes: []
+max_null_ratio: 0.1
+remove_substrings: false
 
 # Strategy configuration
+# Options: suffix_array, mutation_delta
+# strategy:
+#   type: suffix_array
+#   passes:
+#     - min_length: 12
+#       max_length: 64
+#       mode: threshold
+#       threshold: 0.6
+
+
 strategy:
-  type: suffix_array
-
-  passes:
-    - min_length: 32
-      max_length: 64
-      mode: min_token_count
-      token_count: 50
-
-  strip_bytes: [
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-    0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
-    0x7F
-  ]
-
-  max_null_ratio: 0.1
-  remove_substrings: true
+  type: mutation_delta

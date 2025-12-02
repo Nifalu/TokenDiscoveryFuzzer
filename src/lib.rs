@@ -1,276 +1,202 @@
-
 use core::time::Duration;
-#[cfg(feature = "crash")]
-use std::ptr;
 use std::{env, path::PathBuf};
 
-#[cfg(feature = "token_discovery")]
-mod token_discovery_stage;
-#[cfg(feature = "token_discovery")]
-mod token_mutator;
-
-#[cfg(feature = "smart_tokens")]
-mod smart_token_mutations;
-mod common_substring_discovery;
 mod config;
+mod smart_token_mutations;
 mod strategies;
+mod token_discovery_stage;
+mod token_preserving_scheduled_mutator;
 
 use libafl::{
-    corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
+    corpus::{Corpus, InMemoryCorpus, /*InMemoryOnDiskCorpus,*/ OnDiskCorpus},
     events::{setup_restarting_mgr_std, EventConfig, EventRestarter},
     executors::{inprocess::InProcessExecutor, ExitKind},
     feedback_or, feedback_or_fast,
-    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, /*TimeoutFeedback*/},
+    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
     monitors::{MultiMonitor, PrometheusMonitor},
-    mutators::{
-        havoc_mutations::havoc_mutations,
-    },
+    mutators::{havoc_mutations::havoc_mutations, StdScheduledMutator},
     observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
     schedulers::{
-        powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler
+        powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler,
+        testcase_score::CorpusPowerTestcaseScore,
     },
-    stages::calibrate::CalibrationStage,
+    stages::{calibrate::CalibrationStage, mutational::StdMutationalStage},
     state::{HasCorpus, StdState},
-    Error, HasMetadata
+    Error, HasMetadata,
 };
 
 use libafl_bolts::{
     rands::StdRand,
-    tuples::{tuple_list, Merge},
+    tuples::{tuple_list, Merge, Handled},
     AsSlice,
 };
 
 use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
 use mimalloc::MiMalloc;
 
-#[cfg(feature = "smart_tokens")]
+use crate::config::{config, FuzzerPreset, SchedulerPreset};
 use crate::smart_token_mutations::{SmartTokenInsert, SmartTokenReplace, SmartTokens};
-#[cfg(not(feature = "smart_tokens"))]
-use libafl::mutators::{token_mutations::Tokens, scheduled::tokens_mutations, StdScheduledMutator};
-
-#[cfg(feature = "token_discovery")]
-use libafl::schedulers::testcase_score::CorpusPowerTestcaseScore;
+use crate::token_discovery_stage::TokenDiscoveryStage;
+use crate::token_preserving_scheduled_mutator::TokenPreservingScheduledMutator;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-/// The main fn, `no_mangle` as it is a C main
 #[no_mangle]
 pub extern "C" fn libafl_main() {
-    // Registry the metadata types used in this fuzzer
-    // Needed only on no_std
-    // unsafe { RegistryBuilder::register::<Tokens>(); }
-
+    let cfg = config();
+    println!("Workdir: {:?}", env::current_dir().unwrap().to_string_lossy());
     println!(
-        "Workdir: {:?}",
-        env::current_dir().unwrap().to_string_lossy().to_string()
+        "Config: preset={:?}, scheduler={:?}",
+        cfg.fuzzer_preset, cfg.scheduler_preset
     );
+
     fuzz(
-        &[PathBuf::from("./corpus")],
-        PathBuf::from("./crashes"),
+        &[PathBuf::from(&cfg.corpus_dir)],
+        PathBuf::from(&cfg.crashes_dir),
         1337,
     )
         .expect("An error occurred while fuzzing");
 }
 
-/// The actual fuzzer
 fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Result<(), Error> {
-    // While the stats are state, they are usually used in the broker - which is likely never restarted
+    let cfg = config();
+
     let mon = PrometheusMonitor::new("0.0.0.0:8081".to_string(), |s| log::info!("{s}"));
     let multi = MultiMonitor::new(|s| println!("{s}"));
     let monitor = tuple_list!(mon, multi);
 
-
-    // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
     let (state, mut restarting_mgr) =
         match setup_restarting_mgr_std(monitor, broker_port, EventConfig::AlwaysUnique) {
             Ok(res) => res,
-            Err(err) => match err {
-                Error::ShuttingDown => {
-                    return Ok(());
-                }
-                _ => {
-                    panic!("Failed to setup the restarter: {err}");
-                }
-            },
+            Err(Error::ShuttingDown) => return Ok(()),
+            Err(err) => panic!("Failed to setup the restarter: {err}"),
         };
 
-    // Create an observation channel using the coverage map
-    // TODO: This will break soon, fix me! See https://github.com/AFLplusplus/LibAFL/issues/2786
-    #[allow(static_mut_refs)] // only a problem on nightly
+    #[allow(static_mut_refs)]
     let edges_observer = unsafe {
         HitcountsMapObserver::new(StdMapObserver::from_mut_ptr(
             "edges",
             EDGES_MAP.as_mut_ptr(),
             MAX_EDGES_FOUND,
         ))
-            .track_indices()
     };
-
-    // Create an observation channel to keep track of the execution time
+    let edges_observer = edges_observer.track_indices();
+    let edges_handle = edges_observer.handle();
     let time_observer = TimeObserver::new("time");
 
-    let max_map_feedback = MaxMapFeedback::new(&edges_observer);
+    let map_feedback = MaxMapFeedback::new(&edges_observer);
+    let calibration = CalibrationStage::new(&map_feedback);
 
-    let calibration = CalibrationStage::new(&max_map_feedback);
+    let mut feedback = feedback_or!(map_feedback, TimeFeedback::new(&time_observer));
+    let mut objective = feedback_or_fast!(CrashFeedback::new(), TimeoutFeedback::new());
 
-    // Feedback to rate the interestingness of an input
-    // This one is composed by two Feedbacks in OR
-    let mut feedback = feedback_or!(
-        // New maximization map feedback linked to the edges observer and the feedback state
-        max_map_feedback,
-        // Time feedback, this one does not need a feedback state
-        TimeFeedback::new(&time_observer)
-    );
 
-    // A feedback to choose if an input is a solution or not
-    let mut objective = feedback_or_fast!(CrashFeedback::new(), /*TimeoutFeedback::new()*/);
-
-    // If not restarting, create a State from scratch
     let mut state = state.unwrap_or_else(|| {
         StdState::new(
-            // RNG
             StdRand::new(),
-            // Corpus that will be evolved, we keep it in memory for performance
-            InMemoryCorpus::new(),
-            // Corpus in which we store solutions (crashes in this example),
-            // on disk so the user can get them after stopping the fuzzer
-            OnDiskCorpus::new(objective_dir).unwrap(),
-            // States of the feedbacks.
-            // The feedbacks can report the data that should persist in the State.
+            //InMemoryOnDiskCorpus::<BytesInput>::new(&corpus_dirs[0]).unwrap(),
+            InMemoryCorpus::<BytesInput>::new(),
+            OnDiskCorpus::new(&objective_dir).unwrap(),
             &mut feedback,
-            // Same for objective feedbacks
             &mut objective,
         )
             .unwrap()
     });
 
-
-    println!("We're a client, let's fuzz :)");
-
-    // add and initialize needed metadata
-    #[cfg(feature = "smart_tokens")]
     if state.metadata_map().get::<SmartTokens>().is_none() {
         state.add_metadata(SmartTokens::new());
+    }
+
+    let power = match cfg.scheduler_preset {
+        SchedulerPreset::Fast => PowerSchedule::fast(),
+        SchedulerPreset::Explore => PowerSchedule::explore(),
+        SchedulerPreset::Exploit => PowerSchedule::exploit(),
+        SchedulerPreset::Coe => PowerSchedule::coe(),
+        SchedulerPreset::Lin => PowerSchedule::lin(),
+        SchedulerPreset::Quad => PowerSchedule::quad(),
     };
 
-    #[cfg(not(feature = "smart_tokens"))]
-    if state.metadata_map().get::<Tokens>().is_none() {
-        state.add_metadata(Tokens::new());
-    };
-
-
-    #[cfg(feature = "smart_tokens")]
-    let mutator = {
-        use crate::token_mutator::TokenPreservingScheduledMutator;
-
-        TokenPreservingScheduledMutator::new(havoc_mutations().merge(
-            tuple_list!(
-            SmartTokenInsert::new(),
-            SmartTokenReplace::new(),
-        )
-        ))
-    };
-
-    #[cfg(not(feature = "smart_tokens"))]
-    let mutator = StdScheduledMutator::new(havoc_mutations().merge(tokens_mutations()));
-
-    #[cfg(feature = "token_discovery")]
-    let mut stages = {
-        eprintln!("TOKEN DISCOVERY FEATURE IS ENABLED!");
-        use token_discovery_stage::TokenDiscoveryStage;
-
-        let token_discovery_stage: TokenDiscoveryStage<_, _, BytesInput, _, _, CorpusPowerTestcaseScore, _, _, _>
-            = TokenDiscoveryStage::new(mutator, &edges_observer);
-
-        tuple_list!(calibration, token_discovery_stage)
-    };
-
-    #[cfg(not(feature = "token_discovery"))]
-    let mut stages = {
-        eprintln!("TOKEN DISCOVERY FEATURE IS DISABLED!");
-        use libafl::stages::mutational::StdMutationalStage;
-        let std_stage = StdMutationalStage::new(mutator);
-        tuple_list!(calibration, std_stage)
-    };
-
-    // A minimization+queue policy to get testcases from the corpus
     let scheduler = IndexesLenTimeMinimizerScheduler::new(
         &edges_observer,
-        StdWeightedScheduler::with_schedule(
-            &mut state,
-            &edges_observer,
-            Some(PowerSchedule::fast()),
-        ),
+        StdWeightedScheduler::with_schedule(&mut state, &edges_observer, Some(power)),
     );
 
-    // A fuzzer with feedbacks and a corpus scheduler
     let mut fuzzer = StdFuzzer::new(scheduler, feedback, objective);
 
-    // The wrapped harness function, calling out to the LLVM-style harness
     let mut harness = |input: &BytesInput| {
         let target = input.target_bytes();
         let buf = target.as_slice();
-
-        #[cfg(feature = "crash")]
-        if buf.len() > 4 && buf[4] == 0 {
-            unsafe {
-                eprintln!("Crashing (for testing purposes)");
-                let addr = ptr::null_mut();
-                *addr = 1;
-            }
-        }
-
         unsafe {
             libfuzzer_test_one_input(buf);
         }
         ExitKind::Ok
     };
 
-    // Create the executor for an in-process function with one observer for edge coverage and one for the execution time
     let mut executor = InProcessExecutor::with_timeout(
         &mut harness,
         tuple_list!(edges_observer, time_observer),
         &mut fuzzer,
         &mut state,
         &mut restarting_mgr,
-        Duration::new(8, 0),
+        Duration::new(cfg.timeout_secs, 0),
     )?;
-    // 8 seconds timeout
 
-    // The actual target run starts here.
-    // Call LLVMFuzzerInitialize() if present.
     let args: Vec<String> = env::args().collect();
     if unsafe { libfuzzer_initialize(&args) } == -1 {
         println!("Warning: LLVMFuzzerInitialize failed with -1");
     }
 
-    // In case the corpus is empty (on first run), reset
     if state.must_load_initial_inputs() {
         state
             .load_initial_inputs(&mut fuzzer, &mut executor, &mut restarting_mgr, corpus_dirs)
-            .unwrap_or_else(|_| panic!("Failed to load initial corpus at {:?}", &corpus_dirs));
-        println!("We imported {} inputs from disk.", state.corpus().count());
+            .unwrap_or_else(|_| panic!("Failed to load initial corpus at {:?}", corpus_dirs));
+        println!("Imported {} inputs from disk.", state.corpus().count());
     }
 
-    // This fuzzer restarts after 1 mio `fuzz_one` executions.
-    // Each fuzz_one will internally do many executions of the target.
-    // If your target is very instable, setting a low count here may help.
-    // However, you will lose a lot of performance that way.
-    let iters = 1_000_000;
-    fuzzer.fuzz_loop_for(
-        &mut stages,
-        &mut executor,
-        &mut state,
-        &mut restarting_mgr,
-        iters,
-    )?;
+    println!("Starting fuzzer...");
 
-    // It's important, that we store the state before restarting!
-    // Else, the parent will not respawn a new child and quit.
+    match cfg.fuzzer_preset {
+        // Baseline: StdScheduledMutator + havoc only
+        FuzzerPreset::Baseline => {
+            let mutator = StdScheduledMutator::new(havoc_mutations());
+            let mut stages = tuple_list!(calibration, StdMutationalStage::new(mutator));
+            fuzzer.fuzz_loop_for(&mut stages, &mut executor, &mut state, &mut restarting_mgr, cfg.fuzz_loop_for)?;
+        }
+
+        // StandardTokensPlus: StdScheduledMutator + havoc + smart tokens + StdMutationalStage + TokenDiscoveryStage
+        FuzzerPreset::StandardTokens => {
+            let mutations = havoc_mutations().merge(tuple_list!(
+                SmartTokenInsert::new(),
+                SmartTokenReplace::new(),
+            ));
+            let mutator = StdScheduledMutator::new(mutations);
+            let mutational = StdMutationalStage::new(mutator);
+
+            let discovery = TokenDiscoveryStage::<_, _, _, _, CorpusPowerTestcaseScore, _, _, _>::new(edges_handle);
+
+            let mut stages = tuple_list!(calibration, mutational, discovery);
+            fuzzer.fuzz_loop_for(&mut stages, &mut executor, &mut state, &mut restarting_mgr, cfg.fuzz_loop_for)?;
+        }
+
+        // PreservingTokenPlus: TokenPreservingScheduledMutator + havoc + smart tokens + StdMutationalStage + TokenDiscoveryStage
+        FuzzerPreset::PreservingTokens => {
+            let mutations = havoc_mutations().merge(tuple_list!(
+                SmartTokenInsert::new(),
+                SmartTokenReplace::new(),
+            ));
+            let mutator = TokenPreservingScheduledMutator::new(mutations);
+            let mutational = StdMutationalStage::new(mutator);
+
+            let discovery = TokenDiscoveryStage::<_, _, _, _, CorpusPowerTestcaseScore, _, _, _>::new(edges_handle);
+
+            let mut stages = tuple_list!(calibration, mutational, discovery);
+            fuzzer.fuzz_loop_for(&mut stages, &mut executor, &mut state, &mut restarting_mgr, cfg.fuzz_loop_for)?;
+        }
+    }
+
     restarting_mgr.on_restart(&mut state)?;
-
     Ok(())
 }

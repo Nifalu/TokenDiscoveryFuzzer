@@ -59,7 +59,7 @@ impl SmartTokens {
     /// Adds a token to a dictionary, checking it is not a duplicate
     /// Returns `false` if the token was already present and did not get added.
     #[expect(clippy::ptr_arg)]
-    pub fn add_token(&mut self, token: &Vec<u8>) -> Option<usize> {
+    fn add_token(&mut self, token: &Vec<u8>) -> Option<usize> {
         if self.tokens_set.contains(token) {
             return None;
         }
@@ -82,10 +82,16 @@ impl SmartTokens {
             }
         }
     }
-    
+
     pub fn add_tokens(&mut self, tokens: &[Vec<u8>]) {
-        for token in tokens {
+        for (i, token) in tokens.iter().enumerate() {
+            if i < 20 {
+                println!("({}) {}", token.len() ,String::from_utf8_lossy(token));
+            }
             let _ = self.add_token(token);
+        }
+        if tokens.len() > 20 {
+            println!("... and {} more", tokens.len() - 20);
         }
     }
 

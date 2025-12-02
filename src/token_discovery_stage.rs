@@ -4,11 +4,10 @@ use libafl::{
     events::EventFirer,
     executors::{Executor, HasObservers},
     inputs::HasTargetBytes,
-    mutators::{Mutator},
     observers::MapObserver,
     schedulers::TestcaseScore,
-    stages::{mutational::{MutatedTransform},
-             MutationalStage, Restartable, RetryCountRestartHelper, Stage},
+    stages::{mutational::MutatedTransform,
+             Restartable, RetryCountRestartHelper, Stage},
     state::{HasCorpus, HasCurrentTestcase, HasExecutions, HasRand, MaybeHasClientPerfMonitor},
     Error,
     Evaluator,
@@ -23,15 +22,14 @@ use crate::smart_token_mutations::SmartTokens;
 use crate::config::config;
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
-pub struct TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>{
+pub struct TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>{
     name: Cow<'static, str>,
-    mutator: M,
     observer_handle: Handle<C>,
     phantom: PhantomData<(E, EM, I, S, F, Z, O)>,
     stage_executions: u32,
 }
 
-impl<E, EM, I, S, M, F, C, Z, O> Stage<E, EM, S, Z> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
+impl<E, EM, I, S, F, C, Z, O> Stage<E, EM, S, Z> for TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>
 where
     E:  Executor<EM, I, S, Z>
     +HasObservers,
@@ -49,7 +47,6 @@ where
     +HasExecutions
     +HasNamedMetadata
     +HasCurrentCorpusId,
-    M:  Mutator<I, S>,
     F:  TestcaseScore<I, S>,
     C:  Handled + AsRef<O> + AsMut<O>,
     Z:  Evaluator<E, EM, I, S>,
@@ -64,20 +61,18 @@ where
     ) -> Result<(), Error> {
 
         let cfg = config();
-
         // Only perform the stage every N executions and ensure minimum corpus size
         self.stage_executions += 1;
         if self.stage_executions % cfg.search_interval != 0
             || cfg.min_corpus_size > state.corpus().count() {
             return Ok(())
         }
-
         // Discovery Tokens depending on the configured strategy
         // This allows to easily switch between strategies without recompiling
-        let tokens = cfg.strategy.discover_tokens::<E, EM, I, S, M, F, C, Z, O>(
-            fuzzer, executor, state, manager, &mut self.mutator, &self.observer_handle
+        let tokens = cfg.strategy.discover_tokens::<E, EM, I, S, F, C, Z, O>(
+            fuzzer, executor, state, manager, &self.observer_handle
         );
-        
+
         // Add discovered tokens to the SmartTokens metadata
         match tokens {
             Some(t) => {
@@ -95,7 +90,7 @@ where
 /*
 =========================================================================================================
 */
-impl <E, EM, I, S, M, F, C, Z, O> TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
+impl <E, EM, I, S, F, C, Z, O> TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>
 where
     E:  Executor<EM, I, S, Z>
     +HasObservers,
@@ -113,18 +108,16 @@ where
     +HasExecutions
     +HasNamedMetadata
     +HasCurrentCorpusId,
-    M:  Mutator<I, S>,
     F:  TestcaseScore<I, S>,
     C:  Handled + AsRef<O> + AsMut<O>,
     Z:  Evaluator<E, EM, I, S>,
     O:  MapObserver,
 {
 
-    pub fn new(mutator: M, observer: &C) -> Self {
+    pub fn new(observer_handle: Handle<C>) -> Self {
         Self {
-            mutator,
             name: Cow::Owned(STAGE_NAME.to_owned()),
-            observer_handle: observer.handle(),
+            observer_handle,
             phantom: PhantomData,
             stage_executions: 0,
         }
@@ -134,7 +127,7 @@ where
 /*
 =========================================================================================================
 */
-impl<E, EM, I, S, M, F, C, Z, O> Restartable<S> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
+impl<E, EM, I, S, F, C, Z, O> Restartable<S> for TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>
 where
     S: HasMetadata + HasNamedMetadata + HasCurrentCorpusId,
 {
@@ -148,36 +141,9 @@ where
     }
 }
 
-impl <E, EM, I, S, M, F, C, Z, O> MutationalStage<S> for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O>
-where
-    S: HasCurrentTestcase<I>,
-    F: TestcaseScore<I, S>
-{
-    type Mutator = M;
 
-    fn mutator(&self) -> &Self::Mutator {
-        &self.mutator
-    }
 
-    fn mutator_mut(&mut self) -> &mut Self::Mutator {
-        &mut self.mutator
-    }
-
-    /**
-    Calculates the score of the current testcase which determines how many times we should
-    iterate/mutate this testcase. (higher scores mean more mutations will be done)
-    */
-    fn iterations(&self, state: &mut S) -> Result<usize, Error> {
-        // Gets the current Testcase we are fuzzing (mut)
-        let mut testcase = state.current_testcase_mut()?;
-        // Computes the favor factor of a Testcase. Higher is better.
-        let score = F::compute(state, &mut testcase)? as usize;
-
-        Ok(score)
-    }
-}
-
-impl<E, EM, I, S, M, F, C, Z, O> Named for TokenDiscoveryStage<E, EM, I, S, M, F, C, Z, O> {
+impl<E, EM, I, S, F, C, Z, O> Named for TokenDiscoveryStage<E, EM, I, S, F, C, Z, O> {
     fn name(&self) -> &Cow<'static, str> {
         &self.name
     }

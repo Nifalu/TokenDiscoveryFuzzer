@@ -2,7 +2,6 @@ use serde::Deserialize;
 
 use libafl::corpus::Corpus;
 use libafl::inputs::HasTargetBytes;
-use libafl::observers::MapObserver;
 use libafl::state::HasCorpus;
 
 

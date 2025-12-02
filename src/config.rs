@@ -8,28 +8,11 @@ static CONFIG: OnceLock<TokenDiscoveryConfig> = OnceLock::new();
 
 #[derive(Deserialize, Debug, Clone, Copy, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum StagePreset {
+pub enum FuzzerPreset {
     #[default]
     Baseline,
-    SuffixArray,
-    MutationDelta,
-}
-
-#[derive(Deserialize, Debug, Clone, Copy, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MutatorPreset {
-    #[default]
-    Standard,
-    TokenPreserving,
-}
-
-#[derive(Deserialize, Debug, Clone, Copy, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MutationsPreset {
-    #[default]
-    Havoc,
-    HavocWithTokens,
-    HavocWithSmartTokens,
+    StandardTokens,
+    PreservingTokens,
 }
 
 #[derive(Deserialize, Debug, Clone, Copy, Default)]
@@ -44,36 +27,19 @@ pub enum SchedulerPreset {
     Quad,
 }
 
-#[derive(Deserialize, Debug, Clone, Copy, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum CorpusPreset {
-    #[default]
-    InMemory,
-    OnDisk,
-    InMemoryOnDisk,
-    Cached,
-}
-
 #[derive(Deserialize, Debug)]
 pub struct TokenDiscoveryConfig {
-    // Presets
-    pub stage_preset: StagePreset,
-    pub mutator_preset: MutatorPreset,
-    pub mutations_preset: MutationsPreset,
+    // Main preset
+    pub fuzzer_preset: FuzzerPreset,
     pub scheduler_preset: SchedulerPreset,
-    pub corpus_preset: CorpusPreset,
-
-    // Objective
-    pub enable_timeout_objective: bool,
 
     // Paths
     pub corpus_dir: String,
     pub crashes_dir: String,
 
     // Fuzzer settings
-    pub broker_port: u16,
     pub timeout_secs: u64,
-    pub iterations: u64,
+    pub fuzz_loop_for: u64,
 
     // Token discovery settings
     pub min_corpus_size: usize,
@@ -83,52 +49,49 @@ pub struct TokenDiscoveryConfig {
     pub min_token_length: usize,
     pub search_pool_size: usize,
 
+    // SAIS settings
+    pub strip_bytes: Vec<u8>,
+    pub max_null_ratio: Option<f64>,
+    pub remove_substrings: bool,
+
     // Strategy config
     pub strategy: Strategy,
 }
 
 impl TokenDiscoveryConfig {
     pub fn validate(&self) {
-        // TokenPreserving requires token mutations
-        if matches!(self.mutator_preset, MutatorPreset::TokenPreserving)
-            && matches!(self.mutations_preset, MutationsPreset::Havoc)
-        {
-            panic!(
-                "Invalid config: mutator_preset: token_preserving requires token mutations.\n\
-                 Fix: Change 'mutations_preset: havoc' to 'mutations_preset: havoc_with_tokens' or 'mutations_preset: havoc_with_smart_tokens'"
-            );
-        }
-
-        // Token discovery stages require token mutations
-        if matches!(self.stage_preset, StagePreset::SuffixArray | StagePreset::MutationDelta)
-            && matches!(self.mutations_preset, MutationsPreset::Havoc)
-        {
-            panic!(
-                "Invalid config: stage_preset: {:?} requires token mutations.\n\
-                 Fix: Change 'mutations_preset: havoc' to 'mutations_preset: havoc_with_tokens' or 'mutations_preset: havoc_with_smart_tokens'",
-                self.stage_preset
-            );
-        }
-
-        // Standard mutator with SmartTokens is wasteful (warning only)
-        if matches!(self.mutator_preset, MutatorPreset::Standard)
-            && matches!(self.mutations_preset, MutationsPreset::HavocWithSmartTokens)
-        {
-            panic!(
-                "Warning: mutations_preset: havoc_with_smart_tokens works better with mutator_preset: token_preserving.\n\
-                 Consider: Change 'mutator_preset: standard' to 'mutator_preset: token_preserving'"
-            );
+        // Tokens1 and Tokens2 have no separate mutational stage
+        // suffix_array strategy doesn't do mutations itself
+        // This combination is invalid
+        if matches!(self.fuzzer_preset, FuzzerPreset::StandardTokens | FuzzerPreset::PreservingTokens) {
+            if matches!(self.strategy, Strategy::SuffixArray(_)) {
+                panic!(
+                    "Invalid config: fuzzer_preset '{}' has no separate mutational stage, \
+                     but strategy 'suffix_array' does not perform mutations.\n\n\
+                     Fix: Either change 'fuzzer_preset' to 'tokens1_plus' or 'tokens2_plus',\n\
+                     or change 'strategy.type' to 'mutation_delta'.",
+                    match self.fuzzer_preset {
+                        FuzzerPreset::StandardTokens => "standard_token",
+                        FuzzerPreset::PreservingTokens => "preserving_token",
+                        _ => unreachable!(),
+                    }
+                );
+            }
         }
     }
 }
 
 pub fn config() -> &'static TokenDiscoveryConfig {
     CONFIG.get_or_init(|| {
-        let cfg: TokenDiscoveryConfig = fs::read_to_string("token_config.yaml")
-            .map_err(|e| panic!("Failed to load token_config.yaml: {e}"))
+        let config_path = std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| "token_config.yaml".to_string());
+
+        let cfg: TokenDiscoveryConfig = fs::read_to_string(&config_path)
+            .map_err(|e| panic!("Failed to load {}: {e}", config_path))
             .and_then(|s| {
                 serde_yaml::from_str(&s)
-                    .map_err(|e| panic!("Failed to parse token_config.yaml: {e}"))
+                    .map_err(|e| panic!("Failed to parse {}: {e}", config_path))
             })
             .unwrap();
 

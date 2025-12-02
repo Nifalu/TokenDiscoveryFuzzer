@@ -4,7 +4,6 @@ use libafl::corpus::HasCurrentCorpusId;
 use libafl::events::EventFirer;
 use libafl::executors::{Executor, HasObservers};
 use libafl::inputs::HasTargetBytes;
-use libafl::mutators::Mutator;
 use libafl::observers::MapObserver;
 use libafl::schedulers::TestcaseScore;
 use libafl::stages::mutational::MutatedTransform;
@@ -31,13 +30,12 @@ pub enum Strategy {
 
 impl Strategy {
     /// Dispatches to the actual strategy implementation
-    pub fn discover_tokens<E, EM, I, S, M, F, C, Z, O>(
+    pub fn discover_tokens<E, EM, I, S, F, C, Z, O>(
         &self,
         fuzzer: &mut Z,
         executor: &mut E,
         state: &mut S,
         manager: &mut EM,
-        mutator: &mut M,
         observer_handle: &Handle<C>
     ) -> Option<Vec<Vec<u8>>>
     where
@@ -53,7 +51,6 @@ impl Strategy {
         + HasExecutions
         + HasNamedMetadata
         + HasCurrentCorpusId,
-        M: Mutator<I, S>,
         F: TestcaseScore<I, S>,
         C: Handled + AsRef<O> + AsMut<O>,
         Z: Evaluator<E, EM, I, S>,
@@ -65,8 +62,8 @@ impl Strategy {
             }
 
             Strategy::MutationDelta(cfg) => {
-                MutationDeltaConfig::discover_tokens::<E, EM, I, S, M, F, C, Z, O>(
-                    cfg, fuzzer, executor, state, manager, mutator, observer_handle
+                MutationDeltaConfig::discover_tokens::<E, EM, I, S, F, C, Z, O>(
+                    cfg, fuzzer, executor, state, manager, observer_handle
                 )
             }
             // Strategy::Ngram(cfg) => { ... }
