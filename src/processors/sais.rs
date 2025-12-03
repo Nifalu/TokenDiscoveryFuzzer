@@ -51,35 +51,66 @@ impl Processor for Sais {
         let lcp_result = plcp_result.lcp_construction().single_threaded().run().ok()?;
         let (sa, lcp, _, _) = lcp_result.into_parts();
 
-        // 3. Scan LCP array
+
+        // 3. Scan LCP array using stack-based grouping
         let mut candidates: Vec<(Vec<u8>, usize)> = Vec::new();
         let n = sa.len();
-        let mut i = 1;
 
-        while i < n {
-            let current_lcp = lcp[i] as usize;
-            if current_lcp < self.min_len {
-                i += 1;
+        // Stack: (lcp_level, start_pos_in_sa, input_ids)
+        let mut stack: Vec<(usize, usize, HashSet<usize>)> = Vec::new();
+
+        for i in 1..n {
+            let lcp = lcp[i] as usize;
+            let current_input = input_id[sa[i] as usize];
+            let prev_input = input_id[sa[i - 1] as usize];
+
+            // Pop and emit groups closed by this lower LCP
+            while let Some((level, _, _)) = stack.last() {
+                if lcp < *level {
+                    let (level, start, inputs) = stack.pop().unwrap();
+                    if inputs.len() >= 2 {
+                        let pos = sa[start] as usize;
+                        let len = level.min(self.max_len);
+                        if pos + len <= concat.len() {
+                            candidates.push((concat[pos..pos + len].to_vec(), inputs.len()));
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            if lcp < self.min_len {
                 continue;
             }
 
-            let mut group_inputs: HashSet<usize> = HashSet::new();
-            group_inputs.insert(input_id[sa[i - 1] as usize]);
-
-            let mut group_min_lcp = current_lcp;
-            let group_start = i - 1;
-
-            while i < n && (lcp[i] as usize) >= self.min_len {
-                group_inputs.insert(input_id[sa[i] as usize]);
-                group_min_lcp = group_min_lcp.min(lcp[i] as usize);
-                i += 1;
+            // Add to existing group at same level, or push new group
+            if let Some((level, _, inputs)) = stack.last_mut() {
+                if lcp == *level {
+                    inputs.insert(current_input);
+                } else {
+                    // Rise: push new nested group
+                    let mut new_inputs = HashSet::new();
+                    new_inputs.insert(prev_input);
+                    new_inputs.insert(current_input);
+                    stack.push((lcp, i - 1, new_inputs));
+                }
+            } else {
+                // Stack empty: start new group
+                let mut new_inputs = HashSet::new();
+                new_inputs.insert(prev_input);
+                new_inputs.insert(current_input);
+                stack.push((lcp, i - 1, new_inputs));
             }
+        }
 
-            if group_inputs.len() >= 2 {
-                let pos = sa[group_start] as usize;
-                let len = group_min_lcp.min(self.max_len);
+        // Flush remaining stack
+        while let Some((level, start, inputs)) = stack.pop() {
+            if inputs.len() >= 2 {
+                let pos = sa[start] as usize;
+                let len = level.min(self.max_len);
                 if pos + len <= concat.len() {
-                    candidates.push((concat[pos..pos + len].to_vec(), group_inputs.len()));
+                    candidates.push((concat[pos..pos + len].to_vec(), inputs.len()));
                 }
             }
         }
