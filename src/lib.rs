@@ -1,11 +1,12 @@
 use core::time::Duration;
 use std::{env, path::PathBuf};
-
+mod utils;
 mod config;
 mod smart_token_mutations;
-mod strategies;
+mod extractors;
 mod token_discovery_stage;
 mod token_preserving_scheduled_mutator;
+mod processors;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, /*InMemoryOnDiskCorpus,*/ OnDiskCorpus},
@@ -20,7 +21,6 @@ use libafl::{
     observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
     schedulers::{
         powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler,
-        testcase_score::CorpusPowerTestcaseScore,
     },
     stages::{calibrate::CalibrationStage, mutational::StdMutationalStage},
     state::{HasCorpus, StdState},
@@ -36,7 +36,9 @@ use libafl_bolts::{
 use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
 use mimalloc::MiMalloc;
 
-use crate::config::{config, FuzzerPreset, SchedulerPreset};
+use crate::config::{config, ExtractorConfig, FuzzerPreset, SchedulerPreset};
+use crate::extractors::{Extractor, CorpusExtractor, MutationDeltaExtractor};
+use crate::processors::build_pipeline;
 use crate::smart_token_mutations::{SmartTokenInsert, SmartTokenReplace, SmartTokens};
 use crate::token_discovery_stage::TokenDiscoveryStage;
 use crate::token_preserving_scheduled_mutator::TokenPreservingScheduledMutator;
@@ -175,7 +177,14 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
             let mutator = StdScheduledMutator::new(mutations);
             let mutational = StdMutationalStage::new(mutator);
 
-            let discovery = TokenDiscoveryStage::<_, _, _, _, CorpusPowerTestcaseScore, _, _, _>::new(edges_handle);
+            let extractor = match &cfg.extractor {
+                ExtractorConfig::Corpus => Extractor::Corpus(CorpusExtractor),
+                ExtractorConfig::MutationDelta => Extractor::MutationDelta(
+                    MutationDeltaExtractor::new(edges_handle.clone())
+                ),
+            };
+            let processors = build_pipeline(&cfg.pipeline);
+            let discovery = TokenDiscoveryStage::new(extractor, processors);
 
             let mut stages = tuple_list!(calibration, mutational, discovery);
             fuzzer.fuzz_loop_for(&mut stages, &mut executor, &mut state, &mut restarting_mgr, cfg.fuzz_loop_for)?;
@@ -190,7 +199,14 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
             let mutator = TokenPreservingScheduledMutator::new(mutations);
             let mutational = StdMutationalStage::new(mutator);
 
-            let discovery = TokenDiscoveryStage::<_, _, _, _, CorpusPowerTestcaseScore, _, _, _>::new(edges_handle);
+            let extractor = match &cfg.extractor {
+                ExtractorConfig::Corpus => Extractor::Corpus(CorpusExtractor),
+                ExtractorConfig::MutationDelta => Extractor::MutationDelta(
+                    MutationDeltaExtractor::new(edges_handle.clone())
+                ),
+            };
+            let processors = build_pipeline(&cfg.pipeline);
+            let discovery = TokenDiscoveryStage::new(extractor, processors);
 
             let mut stages = tuple_list!(calibration, mutational, discovery);
             fuzzer.fuzz_loop_for(&mut stages, &mut executor, &mut state, &mut restarting_mgr, cfg.fuzz_loop_for)?;

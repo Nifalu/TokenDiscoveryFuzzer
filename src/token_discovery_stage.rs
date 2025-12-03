@@ -1,56 +1,48 @@
 use std::{borrow::Cow, marker::PhantomData};
 use libafl::{
-    corpus::HasCurrentCorpusId,
+    corpus::{Corpus, HasCurrentCorpusId},
     events::EventFirer,
     executors::{Executor, HasObservers},
     inputs::HasTargetBytes,
     observers::MapObserver,
-    schedulers::TestcaseScore,
-    stages::{mutational::MutatedTransform,
-             Restartable, RetryCountRestartHelper, Stage},
-    state::{HasCorpus, HasCurrentTestcase, HasExecutions, HasRand, MaybeHasClientPerfMonitor},
+    stages::{mutational::MutatedTransform, Restartable, RetryCountRestartHelper, Stage},
+    state::{HasCorpus, HasCurrentTestcase, HasRand, MaybeHasClientPerfMonitor},
     Error,
-    Evaluator,
     HasMetadata,
     HasNamedMetadata
 };
-use libafl::corpus::Corpus;
-use libafl_bolts::{tuples::{Handle, Handled, MatchNameRef}, Named};
+use libafl_bolts::{tuples::{Handled, MatchNameRef}, Named};
 
-
-use crate::smart_token_mutations::SmartTokens;
 use crate::config::config;
+use crate::extractors::Extractor;
+use crate::processors::Processor;
+use crate::smart_token_mutations::SmartTokens;
+
 pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
-pub struct TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>{
+pub struct TokenDiscoveryStage<E, EM, I, S, Z, C, O> {
     name: Cow<'static, str>,
-    observer_handle: Handle<C>,
-    phantom: PhantomData<(E, EM, I, S, F, Z, O)>,
+    extractor: Extractor<C>,
+    processors: Vec<Box<dyn Processor>>,
     stage_executions: u32,
+    phantom: PhantomData<(E, EM, I, S, Z, O)>,
 }
 
-impl<E, EM, I, S, F, C, Z, O> Stage<E, EM, S, Z> for TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>
+impl<E, EM, I, S, Z, C, O> Stage<E, EM, S, Z> for TokenDiscoveryStage<E, EM, I, S, Z, C, O>
 where
-    E:  Executor<EM, I, S, Z>
-    +HasObservers,
+    E: Executor<EM, I, S, Z> + HasObservers,
     E::Observers: MatchNameRef,
     EM: EventFirer<I, S>,
-    I:  MutatedTransform<I, S>
-    +Clone
-    +From<Vec<u8>>
-    +HasTargetBytes,
-    S:  HasCorpus<I>
-    +HasMetadata
-    +MaybeHasClientPerfMonitor
-    +HasCurrentTestcase<I>
-    +HasRand
-    +HasExecutions
-    +HasNamedMetadata
-    +HasCurrentCorpusId,
-    F:  TestcaseScore<I, S>,
-    C:  Handled + AsRef<O> + AsMut<O>,
-    Z:  Evaluator<E, EM, I, S>,
-    O:  MapObserver,
+    I: MutatedTransform<I, S> + Clone + From<Vec<u8>> + HasTargetBytes,
+    S: HasCorpus<I>
+    + HasMetadata
+    + MaybeHasClientPerfMonitor
+    + HasCurrentTestcase<I>
+    + HasRand
+    + HasNamedMetadata
+    + HasCurrentCorpusId,
+    C: Handled + AsRef<O> + AsMut<O>,
+    O: MapObserver,
 {
     fn perform(
         &mut self,
@@ -59,80 +51,55 @@ where
         state: &mut S,
         manager: &mut EM,
     ) -> Result<(), Error> {
-
         let cfg = config();
-        // Only perform the stage every N executions and ensure minimum corpus size
+
         self.stage_executions += 1;
         if self.stage_executions % cfg.search_interval != 0
-            || cfg.min_corpus_size > state.corpus().count() {
-            return Ok(())
+            || cfg.min_corpus_size > state.corpus().count()
+        {
+            return Ok(());
         }
-        // Discovery Tokens depending on the configured strategy
-        // This allows to easily switch between strategies without recompiling
-        let tokens = cfg.strategy.discover_tokens::<E, EM, I, S, F, C, Z, O>(
-            fuzzer, executor, state, manager, &self.observer_handle
-        );
 
-        // Add discovered tokens to the SmartTokens metadata
-        match tokens {
-            Some(t) => {
-                if let Ok(token_meta) = state.metadata_mut::<SmartTokens>() {
-                    token_meta.add_tokens(&t);
-                }
-            },
-            None => return Ok(())
+        // 1. Extract initial data
+        let mut data = match self.extractor.extract::<E, EM, I, S, Z, O>(fuzzer, executor, state, manager) {
+            Some(d) => d,
+            None => return Ok(()),
+        };
+
+        // 2. Run through pipeline
+        for proc in &self.processors {
+            data = match proc.process(data) {
+                Some(d) => d,
+                None => return Ok(()),
+            };
+        }
+
+        // 3. Add to SmartTokens
+        if let Ok(token_meta) = state.metadata_mut::<SmartTokens>() {
+            token_meta.add_tokens(&data);
         }
 
         Ok(())
     }
 }
 
-/*
-=========================================================================================================
-*/
-impl <E, EM, I, S, F, C, Z, O> TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>
-where
-    E:  Executor<EM, I, S, Z>
-    +HasObservers,
-    E::Observers: MatchNameRef,
-    EM: EventFirer<I, S>,
-    I:  MutatedTransform<I, S>
-    +Clone
-    +From<Vec<u8>>
-    +HasTargetBytes,
-    S:  HasCorpus<I>
-    +HasMetadata
-    +MaybeHasClientPerfMonitor
-    +HasCurrentTestcase<I>
-    +HasRand
-    +HasExecutions
-    +HasNamedMetadata
-    +HasCurrentCorpusId,
-    F:  TestcaseScore<I, S>,
-    C:  Handled + AsRef<O> + AsMut<O>,
-    Z:  Evaluator<E, EM, I, S>,
-    O:  MapObserver,
-{
-
-    pub fn new(observer_handle: Handle<C>) -> Self {
+impl<E, EM, I, S, Z, C, O> TokenDiscoveryStage<E, EM, I, S, Z, C, O> {
+    pub fn new(extractor: Extractor<C>, processors: Vec<Box<dyn Processor>>) -> Self {
         Self {
-            name: Cow::Owned(STAGE_NAME.to_owned()),
-            observer_handle,
-            phantom: PhantomData,
+            name: Cow::Borrowed(STAGE_NAME),
+            extractor,
+            processors,
             stage_executions: 0,
+            phantom: PhantomData,
         }
     }
 }
 
-/*
-=========================================================================================================
-*/
-impl<E, EM, I, S, F, C, Z, O> Restartable<S> for TokenDiscoveryStage<E, EM, I, S, F, C, Z, O>
+impl<E, EM, I, S, Z, C, O> Restartable<S> for TokenDiscoveryStage<E, EM, I, S, Z, C, O>
 where
     S: HasMetadata + HasNamedMetadata + HasCurrentCorpusId,
 {
     fn should_restart(&mut self, state: &mut S) -> Result<bool, Error> {
-        // Make sure we don't get stuck crashing on a single testcase
         RetryCountRestartHelper::should_restart(state, &self.name, 3)
     }
 
@@ -141,9 +108,7 @@ where
     }
 }
 
-
-
-impl<E, EM, I, S, F, C, Z, O> Named for TokenDiscoveryStage<E, EM, I, S, F, C, Z, O> {
+impl<E, EM, I, S, Z, C, O> Named for TokenDiscoveryStage<E, EM, I, S, Z, C, O> {
     fn name(&self) -> &Cow<'static, str> {
         &self.name
     }

@@ -2,8 +2,6 @@ use serde::Deserialize;
 use std::fs;
 use std::sync::OnceLock;
 
-use crate::strategies::Strategy;
-
 static CONFIG: OnceLock<TokenDiscoveryConfig> = OnceLock::new();
 
 #[derive(Deserialize, Debug, Clone, Copy, Default)]
@@ -25,6 +23,34 @@ pub enum SchedulerPreset {
     Coe,
     Lin,
     Quad,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExtractorConfig {
+    Corpus,
+    MutationDelta,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProcessorConfig {
+    Sais {
+        min_len: usize,
+        max_len: usize,
+        #[serde(default)]
+        threshold: Option<f64>,
+        #[serde(default)]
+        token_count: Option<usize>,
+    },
+    FilterNullBytes {
+        max_ratio: f64,
+    },
+    StripBytes {
+        bytes: Vec<u8>,
+        min_length: usize,
+    },
+    RemoveSubstrings,
 }
 
 #[derive(Deserialize, Debug)]
@@ -49,34 +75,16 @@ pub struct TokenDiscoveryConfig {
     pub min_token_length: usize,
     pub search_pool_size: usize,
 
-    // SAIS settings
-    pub strip_bytes: Vec<u8>,
-    pub max_null_ratio: Option<f64>,
-    pub remove_substrings: bool,
-
     // Strategy config
-    pub strategy: Strategy,
+    pub extractor: ExtractorConfig,
+    pub pipeline: Vec<ProcessorConfig>,
 }
 
 impl TokenDiscoveryConfig {
     pub fn validate(&self) {
-        // Tokens1 and Tokens2 have no separate mutational stage
-        // suffix_array strategy doesn't do mutations itself
-        // This combination is invalid
-        if matches!(self.fuzzer_preset, FuzzerPreset::StandardTokens | FuzzerPreset::PreservingTokens) {
-            if matches!(self.strategy, Strategy::SuffixArray(_)) {
-                panic!(
-                    "Invalid config: fuzzer_preset '{}' has no separate mutational stage, \
-                     but strategy 'suffix_array' does not perform mutations.\n\n\
-                     Fix: Either change 'fuzzer_preset' to 'tokens1_plus' or 'tokens2_plus',\n\
-                     or change 'strategy.type' to 'mutation_delta'.",
-                    match self.fuzzer_preset {
-                        FuzzerPreset::StandardTokens => "standard_token",
-                        FuzzerPreset::PreservingTokens => "preserving_token",
-                        _ => unreachable!(),
-                    }
-                );
-            }
+        // Pipeline is now flexible - validation could check for empty pipeline, etc.
+        if self.pipeline.is_empty() && !matches!(self.fuzzer_preset, FuzzerPreset::Baseline) {
+            println!("Warning: empty pipeline configured");
         }
     }
 }
