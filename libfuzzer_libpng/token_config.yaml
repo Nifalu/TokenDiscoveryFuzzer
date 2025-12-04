@@ -11,26 +11,34 @@ extractor:
 # remove_substrings: removes substrings within the input
 pipeline:
   - type: sais
-    min_len: 4
-    max_len: 32
-    threshold: 0.04
+    min_len: 3
+    max_len: 64
+    threshold: 0.015
 
-#  - type: filter_null_bytes
-#    max_ratio: 0.8 
+  - type: filter_null_bytes
+    max_ratio: 0.4
 
-#  - type: strip_bytes
-#    bytes: [0x00, 0x0A, 0x0D]  # null, LF, CR
-#    min_length: 8 # minimum length after stripping
+  - type: strip_bytes
+    bytes: [0x00, 0x0A, 0x0D, 0x20]  # null, LF, CR, ' ',
+    min_length: 3 # minimum length after stripping
 
-#  - type: remove_substrings
+  - type: remove_similar
+    threshold: 0.7
+    keep_longer: true
+
+  - type: remove_repetitive
+    threshold: 0.6
+
+  #- type: remove_substrings
 
 # Token discovery settings
-min_corpus_size: 250
+min_corpus_size: 500
 search_interval: 2000
 max_tokens: 2500
 max_token_length: 64
 min_token_length: 4
 search_pool_size: 2500
+displayed_tokens: 30
 
 # Fuzzer settings
 fuzzer_preset: preserving_tokens

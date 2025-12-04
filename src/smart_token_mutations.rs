@@ -84,14 +84,15 @@ impl SmartTokens {
     }
 
     pub fn add_tokens(&mut self, tokens: &[Vec<u8>]) {
+        let cfg = config();
         for (i, token) in tokens.iter().enumerate() {
-            if i < 20 {
-                println!("({}) {}", token.len() ,String::from_utf8_lossy(token));
+            if i < cfg.displayed_tokens {
+                println!("({}) {:?}", token.len() ,String::from_utf8_lossy(token));
             }
             let _ = self.add_token(token);
         }
-        if tokens.len() > 20 {
-            println!("... and {} more", tokens.len() - 20);
+        if tokens.len() > cfg.displayed_tokens {
+            println!("... and {} more", tokens.len() - cfg.displayed_tokens);
         }
     }
 

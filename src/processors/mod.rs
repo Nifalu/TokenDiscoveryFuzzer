@@ -1,12 +1,16 @@
 pub mod sais;
-mod remove_substrings;
 mod filter_null_bytes;
 mod strip_bytes;
+mod remove_substrings;
+mod remove_similar;
+mod remove_repetitive;
 
 pub use sais::{Sais, SelectionMode};
-pub use remove_substrings::RemoveSubstrings;
 pub use filter_null_bytes::FilterNullBytes;
 pub use strip_bytes::StripBytes;
+pub use remove_substrings::RemoveSubstrings;
+pub use remove_similar::{RemoveSimilar, KeepStrategy};
+pub use remove_repetitive::RemoveRepetitive;
 
 use crate::config::ProcessorConfig;
 
@@ -34,6 +38,13 @@ pub fn build_pipeline(configs: &[ProcessorConfig]) -> Vec<Box<dyn Processor>> {
             }
             ProcessorConfig::RemoveSubstrings => {
                 Box::new(RemoveSubstrings)
+            }
+            ProcessorConfig::RemoveSimilar { threshold, keep_longer } => {
+                let keep = if *keep_longer { KeepStrategy::Longer } else { KeepStrategy::Shorter };
+                Box::new(RemoveSimilar { threshold: *threshold, keep })
+            }
+            ProcessorConfig::RemoveRepetitive { threshold } => {
+                Box::new(RemoveRepetitive { threshold: *threshold })
             }
         }
     }).collect()

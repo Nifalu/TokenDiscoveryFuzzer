@@ -51,6 +51,13 @@ pub enum ProcessorConfig {
         min_length: usize,
     },
     RemoveSubstrings,
+    RemoveSimilar {
+        threshold: f64,
+        keep_longer: bool,
+    },
+    RemoveRepetitive {
+        threshold: f64,
+    },
 }
 
 #[derive(Deserialize, Debug)]
@@ -74,6 +81,7 @@ pub struct TokenDiscoveryConfig {
     pub max_token_length: usize,
     pub min_token_length: usize,
     pub search_pool_size: usize,
+    pub displayed_tokens: usize,
 
     // Strategy config
     pub extractor: ExtractorConfig,
