@@ -32,31 +32,70 @@ pub enum ExtractorConfig {
     MutationDelta,
 }
 
+fn default_curve() -> f64 { 1.0 } //default = linear
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ThresholdFunction {
+    Fixed { value: f64 },
+    Interpolated {
+        min_threshold: f64,  // at max_len
+        max_threshold: f64,  // at min_len
+        #[serde(default = "default_curve")]
+        curve: f64,
+    },
+}
+
+impl ThresholdFunction {
+    pub fn compute(&self, token_len: usize, min_len: usize, max_len: usize) -> f64 {
+        match self {
+            Self::Fixed { value } => *value,
+            Self::Interpolated { min_threshold, max_threshold, curve } => {
+                let len = token_len.clamp(min_len, max_len);
+                let t = (len - min_len) as f64 / (max_len - min_len) as f64;
+                let curved_t = t.powf(*curve);
+                max_threshold - curved_t * (max_threshold - min_threshold)
+            }
+        }
+    }
+}
+
+
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessorConfig {
-    Sais {
-        min_len: usize,
-        max_len: usize,
-        #[serde(default)]
-        threshold: Option<f64>,
-        #[serde(default)]
-        token_count: Option<usize>,
-    },
     FilterNullBytes {
         max_ratio: f64,
     },
-    StripBytes {
-        bytes: Vec<u8>,
-        min_length: usize,
+    RemoveRepetitive {
+        threshold: f64,
     },
-    RemoveSubstrings,
     RemoveSimilar {
         threshold: f64,
         keep_longer: bool,
     },
-    RemoveRepetitive {
-        threshold: f64,
+    RemoveSubstrings,
+    Sais {
+        #[serde(default)]
+        min_len: Option<usize>,
+        #[serde(default)]
+        max_len: Option<usize>,
+        #[serde(default)]
+        threshold: Option<f64>,
+        #[serde(default)]
+        token_count: Option<usize>,
+        #[serde(default)]
+        threshold_fn: Option<ThresholdFunction>,
+    },
+    SplitAt {
+        delimiters: Vec<Vec<u8>>,
+        #[serde(default)]
+        min_length: Option<usize>,
+    },
+    StripBytes {
+        bytes: Vec<u8>,
+        #[serde(default)]
+        min_length: Option<usize>,
     },
 }
 

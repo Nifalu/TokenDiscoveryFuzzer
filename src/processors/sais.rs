@@ -4,8 +4,11 @@ use libsais::SuffixArrayConstruction;
 use crate::print_stats;
 use super::Processor;
 
+use crate::config::ThresholdFunction;
+
 pub enum SelectionMode {
     Threshold(f64),
+    ThresholdFn(ThresholdFunction),
     MinTokenCount(usize),
 }
 
@@ -116,48 +119,68 @@ impl Processor for Sais {
         }
 
         // 4. Select tokens
-        let (tokens, threshold): (HashSet<Vec<u8>>, usize) = match &self.mode {
+        let tokens: HashSet<Vec<u8>> = match &self.mode {
             SelectionMode::Threshold(t) => {
                 let min_inputs = ((corpus_size as f64) * t).ceil() as usize;
                 let tokens = candidates.into_iter()
                     .filter(|(_, count)| *count >= min_inputs)
                     .map(|(token, _)| token)
                     .collect();
-                (tokens, min_inputs)
+                tokens
+            }
+            SelectionMode::ThresholdFn(f) => {
+                let tokens: HashSet<Vec<u8>> = candidates.into_iter()
+                    .filter(|(token, count)| {
+                        let min_inputs = ((corpus_size as f64) * f.compute(token.len(), self.min_len, self.max_len)).ceil() as usize;
+                        *count >= min_inputs.max(2)  // at least 2 inputs
+                    })
+                    .map(|(token, _)| token)
+                    .collect();
+                self.print_threshold_curve(corpus_size, f);
+                tokens
             }
             SelectionMode::MinTokenCount(target) => {
                 candidates.sort_by(|a, b| b.1.cmp(&a.1));
                 candidates.dedup_by(|a, b| a.0 == b.0);
 
                 if candidates.is_empty() {
-                    (HashSet::new(), 0)
+                    HashSet::new()
                 } else if candidates.len() <= *target {
-                    let min_count = candidates.last().map(|(_, c)| *c).unwrap_or(0);
-                    (candidates.into_iter().map(|(t, _)| t).collect(), min_count)
+                    candidates.into_iter().map(|(t, _)| t).collect()
                 } else {
                     let cutoff = candidates[target.saturating_sub(1)].1;
-                    (candidates.into_iter()
+                    candidates.into_iter()
                          .filter(|(_, count)| *count >= cutoff)
                          .map(|(t, _)| t)
-                         .collect(), cutoff)
+                         .collect()
                 }
             }
         };
 
         print_stats!(self.name(),
-            "{} inputs ({} bytes) pattern matched to {} tokens in {:.3}s | threshold {}/{} ({:.1}%)",
+            "{} inputs ({} bytes) pattern matched to {} tokens in {:.3}s",
             corpus_size,
             concat.len(),
             tokens.len(),
             total_start.elapsed().as_secs_f64(),
-            threshold,
-            corpus_size,
-            (threshold as f64 / corpus_size as f64) * 100.0,
         );
 
         let result: Vec<Vec<u8>> = tokens.into_iter().collect();
         if result.is_empty() { None } else { Some(result) }
     }
-
     fn name(&self) -> &'static str { "sais" }
+}
+
+impl Sais {
+    fn print_threshold_curve(&self, corpus_size: usize, f: &ThresholdFunction) {
+        let points = [0.0, 0.25, 0.5, 0.75, 1.0];
+        let values: Vec<String> = points.iter().map(|&p| {
+            let len = self.min_len + ((self.max_len - self.min_len) as f64 * p) as usize;
+            let thresh = f.compute(len, self.min_len, self.max_len);
+            let count = ((corpus_size as f64) * thresh).ceil() as usize;
+            format!("{}→{}", len, count)
+        }).collect();
+
+        print_stats!(self.name(), "Threshold curve: {} (len→min_inputs)", values.join(" | "));
+    }
 }

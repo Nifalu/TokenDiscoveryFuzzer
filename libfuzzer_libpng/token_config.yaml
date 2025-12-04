@@ -11,32 +11,37 @@ extractor:
 # remove_substrings: removes substrings within the input
 pipeline:
   - type: sais
-    min_len: 3
-    max_len: 64
-    threshold: 0.015
+    threshold_fn:
+      type: interpolated
+      max_threshold: 0.014  # at min_len
+      min_threshold: 0.005  # at max_len
+      curve: 1 # 1.0 is linear, <1.0 = fast initial drop, >1.0 = slow initial drop
 
   - type: filter_null_bytes
     max_ratio: 0.4
 
+  - type: split_at
+    delimiters:
+      - [0x00, 0x00, 0x00] # null byte
+
   - type: strip_bytes
     bytes: [0x00, 0x0A, 0x0D, 0x20]  # null, LF, CR, ' ',
-    min_length: 3 # minimum length after stripping
 
   - type: remove_similar
-    threshold: 0.7
+    threshold: 0.5
     keep_longer: true
 
   - type: remove_repetitive
     threshold: 0.6
 
-  #- type: remove_substrings
+  - type: remove_substrings
 
 # Token discovery settings
 min_corpus_size: 500
 search_interval: 2000
-max_tokens: 2500
+max_tokens: 10000
 max_token_length: 64
-min_token_length: 4
+min_token_length: 3
 search_pool_size: 2500
 displayed_tokens: 30
 
