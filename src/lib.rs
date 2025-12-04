@@ -17,7 +17,7 @@ use libafl::{
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasTargetBytes},
     monitors::{MultiMonitor, PrometheusMonitor},
-    mutators::{havoc_mutations::havoc_mutations, StdScheduledMutator},
+    mutators::{havoc_mutations::havoc_mutations, HavocScheduledMutator},
     observers::{CanTrack, HitcountsMapObserver, StdMapObserver, TimeObserver},
     schedulers::{
         powersched::PowerSchedule, IndexesLenTimeMinimizerScheduler, StdWeightedScheduler,
@@ -163,7 +163,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     match cfg.fuzzer_preset {
         // Baseline: StdScheduledMutator + havoc only
         FuzzerPreset::Baseline => {
-            let mutator = StdScheduledMutator::new(havoc_mutations());
+            let mutator = HavocScheduledMutator::new(havoc_mutations());
             let mut stages = tuple_list!(calibration, StdMutationalStage::new(mutator));
             fuzzer.fuzz_loop_for(&mut stages, &mut executor, &mut state, &mut restarting_mgr, cfg.fuzz_loop_for)?;
         }
@@ -174,7 +174,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
                 SmartTokenInsert::new(),
                 SmartTokenReplace::new(),
             ));
-            let mutator = StdScheduledMutator::new(mutations);
+            let mutator = HavocScheduledMutator::new(mutations);
             let mutational = StdMutationalStage::new(mutator);
 
             let extractor = match &cfg.extractor {
