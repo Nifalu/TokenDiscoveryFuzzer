@@ -22,9 +22,10 @@ pub const STAGE_NAME: &str = "TokenDiscoveryStage";
 
 pub struct TokenDiscoveryStage<E, EM, I, S, Z, C, O> {
     name: Cow<'static, str>,
+    last_corpus_size: usize,
     extractor: Extractor<C>,
     processors: Vec<Box<dyn Processor>>,
-    stage_executions: u32,
+    stage_calls: u32,
     phantom: PhantomData<(E, EM, I, S, Z, O)>,
 }
 
@@ -53,10 +54,19 @@ where
     ) -> Result<(), Error> {
         let cfg = config();
 
-        self.stage_executions += 1;
-        if self.stage_executions % cfg.search_interval != 0
-            || cfg.min_corpus_size > state.corpus().count()
+        self.stage_calls += 1;
+        let current_corpus_size = state.corpus().count();
+
+
+        // Don't run this stage if:
+        // - Corpus size has changed since last execution
+        // - Not enough executions have passed since last run
+        // - Corpus size is below minimum threshold
+        if self.last_corpus_size != current_corpus_size
+            || self.stage_calls % cfg.search_interval != 0
+            || cfg.min_corpus_size > current_corpus_size
         {
+            self.last_corpus_size = current_corpus_size;
             return Ok(());
         }
 
@@ -87,9 +97,10 @@ impl<E, EM, I, S, Z, C, O> TokenDiscoveryStage<E, EM, I, S, Z, C, O> {
     pub fn new(extractor: Extractor<C>, processors: Vec<Box<dyn Processor>>) -> Self {
         Self {
             name: Cow::Borrowed(STAGE_NAME),
+            last_corpus_size: 0,
             extractor,
             processors,
-            stage_executions: 0,
+            stage_calls: 0,
             phantom: PhantomData,
         }
     }

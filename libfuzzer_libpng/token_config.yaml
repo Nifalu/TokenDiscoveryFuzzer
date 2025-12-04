@@ -14,7 +14,7 @@ pipeline:
     threshold_fn:
       type: interpolated
       max_threshold: 0.014  # at min_len
-      min_threshold: 0.005  # at max_len
+      min_threshold: 0.01  # at max_len
       curve: 1 # 1.0 is linear, <1.0 = fast initial drop, >1.0 = slow initial drop
 
   - type: filter_null_bytes
