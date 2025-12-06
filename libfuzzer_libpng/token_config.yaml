@@ -34,7 +34,7 @@ pipeline:
   - type: remove_repetitive
     threshold: 0.6
 
-  - type: remove_substrings
+  #- type: remove_substrings
 
 # Token discovery settings
 min_corpus_size: 500
@@ -50,6 +50,7 @@ fuzzer_preset: preserving_tokens
 scheduler_preset: fast
 timeout_secs: 8
 fuzz_loop_for: 1000000
+cores: "0-14"
 
 # Paths
 corpus_dir: "./corpus"

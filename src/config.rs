@@ -101,6 +101,9 @@ pub enum ProcessorConfig {
 
 #[derive(Deserialize, Debug)]
 pub struct TokenDiscoveryConfig {
+    // runtime settings
+    pub cores: String,
+
     // Main preset
     pub fuzzer_preset: FuzzerPreset,
     pub scheduler_preset: SchedulerPreset,
