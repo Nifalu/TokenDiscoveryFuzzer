@@ -101,20 +101,21 @@ pub enum ProcessorConfig {
 
 #[derive(Deserialize, Debug)]
 pub struct TokenDiscoveryConfig {
-    // runtime settings
+    // System settings
     pub cores: String,
+    pub broker_port: u16,
+    pub prometheus_host: String,
+    pub prometheus_port: u16,
+    pub corpus_dir: String,
+    pub crashes_dir: String,
 
     // Main preset
     pub fuzzer_preset: FuzzerPreset,
     pub scheduler_preset: SchedulerPreset,
-
-    // Paths
-    pub corpus_dir: String,
-    pub crashes_dir: String,
+    pub silent_run: bool,
 
     // Fuzzer settings
     pub timeout_secs: u64,
-    pub fuzz_loop_for: u64,
 
     // Token discovery settings
     pub min_corpus_size: usize,

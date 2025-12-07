@@ -1,3 +1,4 @@
+use crate::config::config;
 use crate::print_stats;
 use super::Processor;
 pub struct FilterNullBytes {
@@ -14,7 +15,9 @@ impl Processor for FilterNullBytes {
             })
             .collect();
 
-        print_stats!(self.name(),"Removed {} tokens with too many null bytes.", token_len - result.len());
+        if !config().silent_run {
+            print_stats!(self.name(),"Removed {} tokens with too many null bytes.", token_len - result.len());
+        }
         if result.is_empty() { None } else { Some(result) }
     }
 

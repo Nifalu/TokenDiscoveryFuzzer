@@ -49,9 +49,13 @@ displayed_tokens: 30
 fuzzer_preset: preserving_tokens
 scheduler_preset: fast
 timeout_secs: 8
-fuzz_loop_for: 1000000
-cores: "0-14"
+silent_run: true
 
-# Paths
+
+# System Settings
+cores: "0-4"
+broker_port: 1337
+prometheus_host: "0.0.0.0"
+prometheus_port: 8083
 corpus_dir: "./corpus"
-crashes_dir: "./crashes"
+crashes_dir: "./crashes_sais"

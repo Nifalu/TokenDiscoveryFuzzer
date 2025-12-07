@@ -86,14 +86,19 @@ impl SmartTokens {
     pub fn add_tokens(&mut self, tokens: &[Vec<u8>]) {
         let cfg = config();
         for (i, token) in tokens.iter().enumerate() {
-            if i < cfg.displayed_tokens {
-                println!("({}) {:?}", token.len() ,String::from_utf8_lossy(token));
+            if !cfg.silent_run {
+                if i < cfg.displayed_tokens {
+                    println!("({}) {:?}", token.len(), String::from_utf8_lossy(token));
+                }
             }
             let _ = self.add_token(token);
         }
-        if tokens.len() > cfg.displayed_tokens {
-            println!("... and {} more", tokens.len() - cfg.displayed_tokens);
+        if !cfg.silent_run {
+            if tokens.len() > cfg.displayed_tokens {
+                println!("... and {} more", tokens.len() - cfg.displayed_tokens);
+            }
         }
+        
     }
 
     /// Determine which tokens to drop whenever the limit is reached.

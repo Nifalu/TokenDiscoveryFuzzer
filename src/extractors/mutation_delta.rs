@@ -114,12 +114,14 @@ impl<C> MutationDeltaExtractor<C> {
 
         let token_length = right_bound - left_bound;
         if token_length >= cfg.min_token_length {
-            println!(
-                "[{}] Found token of length {} at position {}",
-                self.name(),
-                token_length,
-                left_bound
-            );
+            if !cfg.silent_run  {
+                println!(
+                    "[{}] Found token of length {} at position {}",
+                    self.name(),
+                    token_length,
+                    left_bound
+                );
+            }
             Some(vec![mutated_bytes[left_bound..right_bound].to_vec()])
         } else {
             None

@@ -60,7 +60,7 @@ pub extern "C" fn libafl_main() {
     fuzz(
         &[PathBuf::from(&cfg.corpus_dir)],
         PathBuf::from(&cfg.crashes_dir),
-        1337,
+        cfg.broker_port
     )
         .expect("An error occurred while fuzzing");
 }
@@ -68,8 +68,13 @@ pub extern "C" fn libafl_main() {
 fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Result<(), Error> {
     let cfg = config();
 
-    let mon = PrometheusMonitor::new("0.0.0.0:8081".to_string(), |s| log::info!("{s}"));
-    let multi = MultiMonitor::new(|s| println!("{s}"));
+    let prometheus_address = format!("{}:{}", cfg.prometheus_host, cfg.prometheus_port);
+    let mon = PrometheusMonitor::new(prometheus_address, |s| log::info!("{s}"));
+    let multi = MultiMonitor::new(move |s| {
+        if !cfg.silent_run {
+            println!("{s}"); // only print if not in silent mode, prometheus will still monitor
+        }
+    });
     let monitor = tuple_list!(mon, multi);
 
     let cores = Cores::from_cmdline(&cfg.cores)?;

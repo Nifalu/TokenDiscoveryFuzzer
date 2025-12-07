@@ -1,3 +1,4 @@
+use crate::config::config;
 use crate::print_stats;
 use super::Processor;
 
@@ -15,11 +16,12 @@ impl Processor for SplitAt {
             .filter(|t| t.len() >= self.min_length)
             .collect();
 
-        print_stats!(self.name(), "Split {} inputs into {} parts using {} delimiter(s).",
+        if !config().silent_run {
+            print_stats!(self.name(), "Split {} inputs into {} parts using {} delimiter(s).",
             original_count,
             result.len(),
-            self.delimiters.len()
-        );
+            self.delimiters.len());
+        }
 
         if result.is_empty() { None } else { Some(result) }
     }

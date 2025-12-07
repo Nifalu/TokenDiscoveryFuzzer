@@ -4,7 +4,7 @@ use libsais::SuffixArrayConstruction;
 use crate::print_stats;
 use super::Processor;
 
-use crate::config::ThresholdFunction;
+use crate::config::{config, ThresholdFunction};
 
 pub enum SelectionMode {
     Threshold(f64),
@@ -136,7 +136,9 @@ impl Processor for Sais {
                     })
                     .map(|(token, _)| token)
                     .collect();
-                self.print_threshold_curve(corpus_size, f);
+                if !config().silent_run {
+                    self.print_threshold_curve(corpus_size, f);
+                }
                 tokens
             }
             SelectionMode::MinTokenCount(target) => {
@@ -157,13 +159,15 @@ impl Processor for Sais {
             }
         };
 
-        print_stats!(self.name(),
-            "{} inputs ({} bytes) pattern matched to {} tokens in {:.3}s",
-            corpus_size,
-            concat.len(),
-            tokens.len(),
-            total_start.elapsed().as_secs_f64(),
-        );
+        if !config().silent_run {
+            print_stats!(self.name(),
+                "{} inputs ({} bytes) pattern matched to {} tokens in {:.3}s",
+                corpus_size,
+                concat.len(),
+                tokens.len(),
+                total_start.elapsed().as_secs_f64(),
+            );
+        }
 
         let result: Vec<Vec<u8>> = tokens.into_iter().collect();
         if result.is_empty() { None } else { Some(result) }

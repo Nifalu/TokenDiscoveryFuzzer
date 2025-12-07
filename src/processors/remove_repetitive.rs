@@ -1,5 +1,6 @@
 // src/processors/remove_repetitive.rs
 
+use crate::config::config;
 use crate::print_stats;
 use super::Processor;
 
@@ -21,10 +22,12 @@ impl Processor for RemoveRepetitive {
             })
             .collect();
 
-        print_stats!(self.name(), "Removed {} repetitive tokens (threshold {:.0}%).",
-            original_count - result.len(),
-            self.threshold * 100.0
-        );
+        if !config().silent_run {
+            print_stats!(self.name(), "Removed {} repetitive tokens (threshold {:.0}%).",
+                original_count - result.len(),
+                self.threshold * 100.0
+            );
+        }
 
         if result.is_empty() { None } else { Some(result) }
     }

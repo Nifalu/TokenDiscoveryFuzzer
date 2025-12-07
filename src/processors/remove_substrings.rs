@@ -1,3 +1,4 @@
+use crate::config::config;
 use crate::print_stats;
 use super::Processor;
 pub struct RemoveSubstrings;
@@ -20,8 +21,9 @@ impl Processor for RemoveSubstrings {
                 result.push(token);
             }
         }
-
-        print_stats!(self.name(), "Removed {} substrings from tokens.", token_len - result.len());
+        if !config().silent_run {
+            print_stats!(self.name(), "Removed {} substrings from tokens.", token_len - result.len());
+        }
 
         if result.is_empty() { None } else { Some(result) }
     }

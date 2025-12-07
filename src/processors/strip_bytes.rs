@@ -1,3 +1,4 @@
+use crate::config::config;
 use crate::print_stats;
 use super::Processor;
 pub struct StripBytes {
@@ -33,12 +34,14 @@ impl Processor for StripBytes {
             })
             .collect();
 
-        let removed_count = original_count - result.len();
-        print_stats!(self.name(),"Stripped {} tokens, removed {} below min length {}.",
-            stripped_count,
-            removed_count,
-            self.min_length
-        );
+        if !config().silent_run {
+            let removed_count = original_count - result.len();
+            print_stats!(self.name(),"Stripped {} tokens, removed {} below min length {}.",
+                stripped_count,
+                removed_count,
+                self.min_length
+            );
+        }
 
         if result.is_empty() { None } else { Some(result) }
     }
