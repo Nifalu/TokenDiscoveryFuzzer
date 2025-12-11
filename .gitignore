@@ -11,7 +11,7 @@ libfuzzer_libmozjpeg/crashes/
 target/
 target_with_tokens/
 target_without_tokens/
-
+*/runs/
 
 
 

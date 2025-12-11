@@ -190,30 +190,28 @@ pub fn config() -> &'static TokenDiscoveryConfig {
         let config_path = std::env::args()
             .nth(1)
             .unwrap_or_else(|| exit_with_error("Usage: fuzzer <config.json>"));
-        eprintln!("1");
+
         // Load default config (required)
         let default_str = find_default_config()
             .unwrap_or_else(|e| exit_with_error(&e));
-        eprintln!("2");
+
         let mut base: Value = serde_json::from_str(&default_str)
             .unwrap_or_else(|e| exit_with_error(&format!("Invalid default_config.json: {e}")));
-        eprintln!("3");
+
         // Load user config
         let user_str = fs::read_to_string(&config_path)
             .unwrap_or_else(|e| exit_with_error(&format!("Failed to load {config_path}: {e}")));
-        eprintln!("4");
+
         let user_config: Value = serde_json::from_str(&user_str)
             .unwrap_or_else(|e| exit_with_error(&format!("Invalid JSON in {config_path}: {e}")));
-        eprintln!("5");
+
         // Merge and deserialize
         merge_json(&mut base, &user_config);
-        eprintln!("6");
+
         let cfg: TokenDiscoveryConfig = serde_json::from_value(base)
             .unwrap_or_else(|e| exit_with_error(&format!("Config error: {e}")));
-        eprintln!("Config loaded: cores={}, broker_port={}", cfg.cores, cfg.broker_port);
 
         cfg.validate();
-        eprintln!("7");
         cfg
     })
 }

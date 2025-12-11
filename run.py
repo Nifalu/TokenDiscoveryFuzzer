@@ -37,10 +37,12 @@ def fetch_executions(port):
         url = f"http://localhost:{port}/metrics"
         with urllib.request.urlopen(url, timeout=2) as resp:
             for line in resp.read().decode().split('\n'):
-                if line.startswith('executions_total{') and 'client="global"' in line:
+                if line.startswith('global_executions_total{') and 'client="global"' in line:
                     return int(float(line.split()[-1]))
-    except Exception:
-        print("Error fetching executions from port", port)
+    except TimeoutError:
+        print(f"Timeout connecting to port {port}")
+    except ValueError as e:
+        print(f"Failed to parse metrics from port {port}: {e}")
     return None
 
 def create_instance_config(base_path, inst, tmp_dir):
@@ -108,25 +110,29 @@ def cmd_run(bench_path, host_override=None):
     print(f"Rounds: {rounds}, Host: {host}")
 
     try:
+        # Create configs once before all rounds
+        tmp_dir = os.path.join(runs_dir, "tmp_configs")
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        instance_configs = {}
+        for inst in bench['instances']:
+            inst_name = get_instance_name(inst)
+            base_cfg = os.path.join(config_dir, inst['config'])
+            if not os.path.exists(base_cfg):
+                print(f"Warning: {base_cfg} not found, skipping")
+                continue
+            instance_configs[inst_name] = {
+                'cfg_path': create_instance_config(base_cfg, inst, tmp_dir),
+                'port': inst['prometheus_port']
+            }
+
         for rnd in range(1, rounds + 1):
             print(f"\n{'='*50}\nROUND {rnd}/{rounds}\n{'='*50}")
 
-            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-            run_dir = os.path.join(runs_dir, f"{timestamp}_{name}_round{rnd}")
-            os.makedirs(run_dir, exist_ok=True)
-            print(f"Run directory: {run_dir}")
-
             active_processes = {}
 
-            for inst in bench['instances']:
-                inst_name = get_instance_name(inst)
-                base_cfg = os.path.join(config_dir, inst['config'])
-
-                if not os.path.exists(base_cfg):
-                    print(f"Warning: {base_cfg} not found, skipping")
-                    continue
-
-                cfg_path = create_instance_config(base_cfg, inst, run_dir)
+            for inst_name, info in instance_configs.items():
+                cfg_path = info['cfg_path']
 
                 print(f"Starting {inst_name}...")
                 proc = subprocess.Popen(
@@ -136,7 +142,7 @@ def cmd_run(bench_path, host_override=None):
                     cwd=fuzzer_dir,
                     preexec_fn=os.setsid
                 )
-                active_processes[inst_name] = {'proc': proc, 'port': inst['prometheus_port']}
+                active_processes[inst_name] = {'proc': proc, 'port': info['port']}
 
             if not active_processes:
                 print("No instances started!")
@@ -217,7 +223,7 @@ def cleanup():
             pass
     active_processes = {}
 
-def signal_handler(sig, frame):
+def signal_handler(_, __):
     print("\n\nInterrupted! Cleaning up...")
     cleanup()
     sys.exit(130)
