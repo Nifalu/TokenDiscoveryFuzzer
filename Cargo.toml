@@ -36,7 +36,7 @@ libafl_cc = "0.15.4"
 log = { version = "0.4.22", features = ["release_max_level_info"] }
 mimalloc = { version = "0.1.43", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_yaml = "0.9.34"
+serde_json = "1.0.145"
 
 [lib]
 name = "fuzzer_framework"

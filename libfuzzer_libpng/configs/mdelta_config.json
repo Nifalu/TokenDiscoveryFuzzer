@@ -1,0 +1,29 @@
+{
+  "fuzzer_preset": "preserving_tokens",
+  "scheduler_preset": "fast",
+  "silent_run": true,
+  "timeout_secs": 8,
+
+  "extractor": {"type": "mutation_delta"},
+  "pipeline": [
+    {"type": "filter_null_bytes", "max_ratio": 0.4},
+    {"type": "strip_bytes", "bytes": [0, 10, 13, 32], "min_length": 3},
+    {"type": "remove_similar", "threshold": 0.5, "keep_longer": true},
+    {"type": "remove_repetitive", "threshold": 0.6}
+  ],
+
+  "min_corpus_size": 500,
+  "search_interval": 2000,
+  "max_tokens": 10000,
+  "max_token_length": 64,
+  "min_token_length": 3,
+  "search_pool_size": 2500,
+  "displayed_tokens": 30,
+
+  "cores": "10-14",
+  "broker_port": 1339,
+  "prometheus_host": "0.0.0.0",
+  "prometheus_port": 8083,
+  "corpus_dir": "./corpus",
+  "crashes_dir": "./crashes_mdelta"
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "targets": [
+      "1.1.1.1:8081"
+    ],
+    "labels": {
+      "job": "base",
+      "benchmark": "libpng_comparison"
+    }
+  },
+  {
+    "targets": [
+      "1.1.1.1:8082"
+    ],
+    "labels": {
+      "job": "sais",
+      "benchmark": "libpng_comparison"
+    }
+  },
+  {
+    "targets": [
+      "1.1.1.1:8083"
+    ],
+    "labels": {
+      "job": "mdelta",
+      "benchmark": "libpng_comparison"
+    }
+  }
+]
