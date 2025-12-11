@@ -8,7 +8,7 @@
   "pipeline": [],
 
   "min_corpus_size": 500,
-  "search_interval": 2000,
+  "search_interval": 10000,
   "max_tokens": 10000,
   "max_token_length": 64,
   "min_token_length": 3,

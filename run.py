@@ -90,7 +90,8 @@ def cmd_run(bench_path, host_override=None):
 
     host = host_override or bench.get('host') or "127.0.0.1"
     name = bench.get('name', 'benchmark')
-    target = bench.get('target_executions')
+    raw_target = bench.get('target_executions')
+    target = int(str(raw_target).replace("'", "").replace("_", "")) if raw_target else None
     poll_interval = bench.get('poll_interval', 5)
     rounds = bench.get('rounds', 1)
     pause = bench.get('pause_between_rounds', 300)

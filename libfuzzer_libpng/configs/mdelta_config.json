@@ -20,7 +20,6 @@
   "search_pool_size": 2500,
   "displayed_tokens": 30,
 
-  "cores": "10-14",
   "broker_port": 1339,
   "prometheus_host": "0.0.0.0",
   "prometheus_port": 8083,

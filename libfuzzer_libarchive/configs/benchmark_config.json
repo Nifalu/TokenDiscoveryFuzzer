@@ -1,9 +1,9 @@
 {
-  "name": "libpng_comparison",
+  "name": "libarchive_comparison",
   "target_executions": "20_000_000_000",
   "poll_interval": 1,
   "rounds": 3,
-  "pause_between_rounds": 300,
+  "pause_between_rounds": 600,
   "instances": [
     {"config": "baseline_config.json", "cores": "0-2", "broker_port": 1337, "prometheus_port": 8081},
     {"config": "sais_config.json", "cores": "3-5", "broker_port": 1338, "prometheus_port": 8082},
