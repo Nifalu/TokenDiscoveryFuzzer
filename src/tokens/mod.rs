@@ -1,1 +1,1 @@
-mod weighted_token;
+mod shared_token_storage;

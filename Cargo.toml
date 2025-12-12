@@ -14,10 +14,9 @@ crash = []
 
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
 opt-level = 3
-debug = true
 
 [build-dependencies]
 

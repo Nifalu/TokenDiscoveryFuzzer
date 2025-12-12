@@ -7,6 +7,7 @@ mod extractors;
 mod token_discovery_stage;
 mod token_preserving_scheduled_mutator;
 mod processors;
+mod tokens;
 
 use libafl::{
     corpus::{Corpus, InMemoryCorpus, /*InMemoryOnDiskCorpus,*/ OnDiskCorpus},
@@ -34,7 +35,7 @@ use libafl_bolts::{
     shmem::StdShMemProvider,
     AsSlice,
 };
-
+use libafl_bolts::shmem::{MmapShMemProvider, ShMemId, ShMemProvider};
 use libafl_targets::{libfuzzer_initialize, libfuzzer_test_one_input, EDGES_MAP, MAX_EDGES_FOUND};
 use mimalloc::MiMalloc;
 
@@ -76,7 +77,6 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
         }
     });
     let monitor = tuple_list!(mon, multi);
-
     let cores = Cores::from_cmdline(&cfg.cores)?;
 
     let corpus_dirs_clone = corpus_dirs.to_vec();
@@ -89,6 +89,24 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
             let cfg = config();
             let corpus_dirs = &corpus_dirs_clone;
             let objective_dir = &objective_dir_clone;
+
+            let shmem_name = format!("libafl_tokens_{}", cfg.broker_port);
+            let shmem_size = (cfg.max_token_length + 2) * cfg.max_tokens + 16;
+
+            let mut shmem_provider = MmapShMemProvider::new()?;
+            let token_shmem = match shmem_provider.new_shmem_with_id(shmem_size, &shmem_name) {
+                Ok(shmem) => {
+                    // We're first - created it
+                    println!("Created token shmem: {}", shmem_name);
+                    shmem
+                }
+                Err(_) => {
+                    // Already exists (O_EXCL failed) - attach
+                    let id = ShMemId::from_string(&format!("/{}", shmem_name));
+                    println!("Attaching to existing token shmem: {}, id: {}", shmem_name, id);
+                    shmem_provider.shmem_from_id_and_size(id, shmem_size)?
+                }
+            };
 
             #[allow(static_mut_refs)]
             let edges_observer = unsafe {

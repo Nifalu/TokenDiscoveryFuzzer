@@ -7,9 +7,9 @@
   "extractor": {"type": "corpus"},
   "pipeline": [],
 
-  "broker_port": 1337,
+  "broker_port": 1345,
   "prometheus_host": "0.0.0.0",
-  "prometheus_port": 8081,
+  "prometheus_port": 8095,
   "corpus_dir": "./corpus",
   "crashes_dir": "./crashes_base"
 }
