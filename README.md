@@ -12,37 +12,6 @@ This fuzzer extends standard coverage-guided fuzzing with **automatic token disc
 - **Smart Token Mutations**: Preserves token mutations by applying them last in mutation stacks
 - **Configurable Pipeline**: Chain processors to filter and refine discovered tokens
 
-## Project Structure
-
-```
-TokenDiscoveryFuzzer/
-├── src/
-│   ├── lib.rs                              # Main fuzzer logic
-│   ├── config.rs                           # Configuration parsing
-│   ├── smart_token_mutations.rs            # SmartTokenInsert/Replace mutators
-│   ├── token_preserving_scheduled_mutator.rs  # Preserves token mutations
-│   ├── token_discovery_stage.rs            # Stage that runs extraction + pipeline
-│   ├── extractors/                         # Token extraction strategies
-│   │   ├── corpus.rs                       # Extract from corpus entries
-│   │   └── mutation_delta.rs               # Extract from coverage-changing mutations
-│   └── processors/                         # Token filtering/refinement
-│       ├── sais.rs                         # Suffix array pattern matching
-│       ├── filter_null_bytes.rs
-│       ├── strip_bytes.rs
-│       ├── remove_substrings.rs
-│       ├── remove_similar.rs
-│       ├── remove_repetitive.rs
-│       └── split_at.rs
-├── libfuzzer_*/                            # Fuzzing targets
-│   ├── harness.cc                          # LLVMFuzzerTestOneInput implementation
-│   ├── corpus/                             # Initial seed corpus
-│   └── configs/                            # Target-specific configurations
-├── build.sh                                # Build script for all targets
-├── run.py                                  # Benchmark runner
-├── default_config.json                     # Base configuration (merged with target configs)
-└── monitoring/                             # Prometheus + Grafana setup
-```
-
 ## Quick Start
 
 ### Prerequisites
