@@ -2,8 +2,7 @@ corpus/
 corpus*/
 *corpus/
 libarchive-*
-crashes/
-crashes_organized/
+crashes*/
 fuzz*
 *.o
 *.a

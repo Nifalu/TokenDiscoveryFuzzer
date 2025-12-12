@@ -215,7 +215,7 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
                     let discovery = TokenDiscoveryStage::new(extractor, processors);
 
                     let mut stages = tuple_list!(calibration, mutational, discovery);
-                    fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut restarting_mgr)?;
+                    fuzzer.fuzz_loop_for(&mut stages, &mut executor, &mut state, &mut restarting_mgr, 10_000_000)?;
                 }
             }
 

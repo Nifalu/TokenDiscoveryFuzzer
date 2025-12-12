@@ -1,18 +1,12 @@
 {
   "name": "mxml_benchmark",
-  "target_executions": "200_000_000",
+  "target_executions": "20_000_000_000",
   "poll_interval": 5,
   "rounds": 1,
   "pause_between_rounds": 1,
   "instances": [
-    {"config": "baseline_config.json", "cores": "0-3", "broker_port": 1337, "prometheus_port": 8081},
-    {"config": "sais_config.json", "cores": "4-7", "broker_port": 1338, "prometheus_port": 8082},
-    {"config": "mdelta_config.json", "cores": "8-11", "broker_port": 1339, "prometheus_port": 8083},
-    {"config": "baseline_config.json", "cores": "12-15", "broker_port": 1340, "prometheus_port": 8084},
-    {"config": "sais_config.json", "cores": "16-19", "broker_port": 1341, "prometheus_port": 8085},
-    {"config": "mdelta_config.json", "cores": "20-23", "broker_port": 1342, "prometheus_port": 8086},
-    {"config": "baseline_config.json", "cores": "24-27", "broker_port": 1343, "prometheus_port": 8087},
-    {"config": "sais_config.json", "cores": "28-31", "broker_port": 1344, "prometheus_port": 8088},
-    {"config": "mdelta_config.json", "cores": "32-35", "broker_port": 1345, "prometheus_port": 8089}
+    {"config": "baseline_config.json", "cores": "0-9", "broker_port": 1337, "prometheus_port": 8081},
+    {"config": "sais_config.json", "cores": "10-19", "broker_port": 1338, "prometheus_port": 8082},
+    {"config": "mdelta_config.json", "cores": "20-29", "broker_port": 1339, "prometheus_port": 8083}
   ]
 }

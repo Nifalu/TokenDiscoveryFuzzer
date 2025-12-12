@@ -1,51 +1,51 @@
-# Libfuzzer for libmozjpeg
+# libmozjpeg Fuzzer
 
-This folder contains an example fuzzer for libmozjpeg, using LLMP for fast multi-process fuzzing and crash detection.
-Alongside the traditional edge coverage, this example shows how to use a value-profile like feedback to bypass CMPs and an allocations size maximization feedback to spot patological inputs in terms of memory usage.
-It has been tested on Linux.
+Fuzzing target for Mozilla's optimized JPEG encoder/decoder.
 
 ## Build
 
-To build this example, run `cargo build --release`.
-This will build the library with the fuzzer (src/lib.rs) with the libfuzzer compatibility layer. the SanitizerCoverage runtime functions for edges and value-profile feedbacks and the `hook_allocs.c` C file that hooks the allocator to report the size to the fuzzer.
-In addition, it will build also two C and C++ compiler wrappers (bin/c(c/xx).rs) that you must use to compile the target.
-
-Then download the mozjpeg source tarball from  and unpack the archive:
 ```bash
-wget https://github.com/mozilla/mozjpeg/archive/v4.0.3.tar.gz
-tar -xzvf v4.0.3.tar.gz
+# From project root
+./build.sh build libmozjpeg
 ```
 
-Now compile it with:
+This downloads mozjpeg 4.0.3, compiles it with LibAFL instrumentation, and links the fuzzer.
 
-```
+## Manual Build
+
+```bash
+# Download
+wget https://github.com/mozilla/mozjpeg/archive/refs/tags/v4.0.3.tar.gz
+tar -xzf v4.0.3.tar.gz
+
+# Build mozjpeg
 cd mozjpeg-4.0.3
-cmake . \
-  -DBUILD_SHARED_LIBS=OFF \
-  -DCMAKE_C_COMPILER="$(pwd)/../target/release/libafl_cc" \
-  -DCMAKE_CXX_COMPILER="$(pwd)/../target/release/libafl_cxx" \
-  -G "Unix Makefiles"
-make -j `nproc`
+cmake . -DCMAKE_C_COMPILER="../target/release/libafl_cc" \
+        -DCMAKE_CXX_COMPILER="../target/release/libafl_cxx" \
+        -DENABLE_SHARED=OFF -G "Unix Makefiles"
+make -j$(nproc)
+cp libjpeg.a ..
 cd ..
+
+# Link fuzzer
+../target/release/libafl_cxx harness.cc libjpeg.a -I mozjpeg-4.0.3/ -o fuzzer
 ```
 
-Now, we have to build the libfuzzer harness and link all together to create our fuzzer binary.
+## Corpus
 
-```
-./target/release/libafl_cxx ./harness.cc ./mozjpeg-4.0.3/*.a -I ./mozjpeg-4.0.3/ -o fuzzer_mozjpeg
-```
-
-Afterward, the fuzzer will be ready to run by simply executing `./fuzzer_mozjpeg`.
-Note that, unless you use the `launcher`, you will have to run the binary multiple times to actually start the fuzz process, see `Run` in the following.
-This allows you to run multiple different builds of the same fuzzer alongside, for example, with and without ASAN (`-fsanitize=address`) or with different mutators.
+Add JPEG files to `corpus/`. Sample sources:
+- https://github.com/AcademySoftwareFoundation/openimageio/tree/main/testsuite/jpeg
+- Any collection of small JPEG images
 
 ## Run
 
-The first time you run the binary, the broker will open a tcp port (currently on port `1337`), waiting for fuzzer clients to connect. This port is local and only used for the initial handshake. All further communication happens via shared map, to be independent of the kernel.
+```bash
+./fuzzer configs/sais_config.json
+```
 
-Each following execution will run a fuzzer client.
-As this example uses in-process fuzzing, we added a Restarting Event Manager (`setup_restarting_mgr`).
-This means each client will start itself again to listen for crashes and timeouts.
-By restarting the actual fuzzer, it can recover from these exit conditions.
+## Test Crashes
 
-In any real-world scenario, you should use `taskset` to pin each client to an empty CPU core, the lib does not pick an empty core automatically, unless you use the `launcher`.
+```bash
+clang++ -DSTANDALONE_BUILD harness.cc libjpeg.a -I mozjpeg-4.0.3/ -g -fsanitize=address -o test_mozjpeg
+./test_mozjpeg crashes/<file>
+```

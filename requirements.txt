@@ -1,4 +1,0 @@
-prometheus-api-client
-pandas
-numpy
-matplotlib

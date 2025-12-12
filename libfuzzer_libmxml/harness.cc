@@ -1,19 +1,12 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <setjmp.h>
 
 #include "mxml.h"
 
-static jmp_buf jump_buffer;
-static bool use_longjmp = false;
-
-// Custom error callback to silence errors and recover
 void error_callback(void *cbdata, const char *message) {
     (void)cbdata;
-    if (use_longjmp) {
-        longjmp(jump_buffer, 1);
-    }
+    (void)message;
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
@@ -21,13 +14,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         return 0;
     }
 
-    // Null-terminate the input
     char *xml_str = (char *)malloc(size + 1);
     if (!xml_str) return 0;
     memcpy(xml_str, data, size);
     xml_str[size] = '\0';
 
-    // Set up error handling
     mxml_options_t *options = mxmlOptionsNew();
     if (!options) {
         free(xml_str);
@@ -35,33 +26,17 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
     mxmlOptionsSetErrorCallback(options, error_callback, NULL);
 
-    use_longjmp = true;
-    if (setjmp(jump_buffer)) {
-        // Error occurred, cleanup and return
-        use_longjmp = false;
-        mxmlOptionsDelete(options);
-        free(xml_str);
-        return 0;
-    }
-
-    // Parse the XML string
     mxml_node_t *tree = mxmlLoadString(NULL, options, xml_str);
 
     if (tree) {
-        // Exercise various API functions to increase coverage
-
-        // Walk the tree
         mxml_node_t *node = mxmlGetFirstChild(tree);
         while (node) {
-            // Get node type and data
             mxml_type_t type = mxmlGetType(node);
 
             switch (type) {
                 case MXML_TYPE_ELEMENT: {
                     const char *name = mxmlGetElement(node);
                     (void)name;
-
-                    // Iterate attributes
                     int count = mxmlElementGetAttrCount(node);
                     for (int i = 0; i < count && i < 100; i++) {
                         const char *attr_name;
@@ -95,19 +70,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                     break;
             }
 
-            // Navigate tree
             node = mxmlWalkNext(node, tree, MXML_DESCEND_ALL);
         }
 
-        // Try finding elements (common patterns)
         mxmlFindElement(tree, tree, NULL, NULL, NULL, MXML_DESCEND_ALL);
         mxmlFindPath(tree, "*");
 
-        // Cleanup
         mxmlDelete(tree);
     }
 
-    use_longjmp = false;
     mxmlOptionsDelete(options);
     free(xml_str);
     return 0;
