@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <soap:Header><auth:Token xmlns:auth="http://auth.example.com">ABC123</auth:Token></soap:Header>
+    <soap:Body>
+        <ns:Request xmlns:ns="http://api.example.com"><ns:Param>value</ns:Param></ns:Request>
+    </soap:Body>
+</soap:Envelope>

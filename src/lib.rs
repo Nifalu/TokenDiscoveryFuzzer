@@ -71,8 +71,8 @@ fn fuzz(corpus_dirs: &[PathBuf], objective_dir: PathBuf, broker_port: u16) -> Re
     let prometheus_address = format!("{}:{}", cfg.prometheus_host, cfg.prometheus_port);
     let mon = PrometheusMonitor::new(prometheus_address, |s| log::info!("{s}"));
     let multi = MultiMonitor::new(move |s| {
-        if !cfg.silent_run {
-            println!("{s}"); // only print if not in silent mode, prometheus will still monitor
+        if !cfg.silent_run && !cfg.disable_multimonitor {
+            println!("{s}"); // only print if not in silent mode and multimonitor is not disabled
         }
     });
     let monitor = tuple_list!(mon, multi);

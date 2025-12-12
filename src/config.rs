@@ -114,6 +114,7 @@ pub struct TokenDiscoveryConfig {
     pub fuzzer_preset: FuzzerPreset,
     pub scheduler_preset: SchedulerPreset,
     pub silent_run: bool,
+    pub disable_multimonitor: bool,
 
     // Fuzzer settings
     pub timeout_secs: u64,

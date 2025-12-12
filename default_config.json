@@ -2,6 +2,7 @@
   "fuzzer_preset": "preserving_tokens",
   "scheduler_preset": "fast",
   "silent_run": false,
+  "disable_multimonitor": false,
   "timeout_secs": 8,
 
   "extractor": {"type": "corpus"},

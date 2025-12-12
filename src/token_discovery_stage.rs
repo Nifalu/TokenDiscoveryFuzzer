@@ -62,13 +62,14 @@ where
         // - Corpus size has changed since last execution
         // - Not enough executions have passed since last run
         // - Corpus size is below minimum threshold
-        if self.last_corpus_size != current_corpus_size
+        if self.last_corpus_size == current_corpus_size
             || self.stage_calls % cfg.search_interval != 0
             || cfg.min_corpus_size > current_corpus_size
         {
-            self.last_corpus_size = current_corpus_size;
             return Ok(());
         }
+
+        self.last_corpus_size = current_corpus_size;
 
         // 1. Extract initial data
         let mut data = match self.extractor.extract::<E, EM, I, S, Z, O>(fuzzer, executor, state, manager) {

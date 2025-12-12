@@ -85,6 +85,9 @@ do_clean() {
         libarchive)
             rm -rf libarchive-3.8.2 libarchive.a libarchive-3.8.2.tar.gz fuzzer
             ;;
+        libmxml)
+            rm -rf mxml-4.0.3 libmxml4.a mxml-4.0.3.tar.gz fuzzer
+            ;;
     esac
 
     cd ..
@@ -150,6 +153,20 @@ do_build() {
             fi
             "$LIBAFL_CXX" harness.cc libarchive.a -I libarchive-3.8.2/libarchive/ \
                 -lz -lbz2 -llzma -lzstd -lcrypto -lxml2 -o fuzzer
+            ;;
+
+        libmxml)
+            if [ ! -f "libmxml4.a" ]; then
+                echo "Building libmxml..."
+                wget -q https://github.com/michaelrsweet/mxml/releases/download/v4.0.3/mxml-4.0.3.tar.gz
+                tar -xzf mxml-4.0.3.tar.gz
+                cd mxml-4.0.3
+                ./configure --enable-shared=no
+                make CC="$LIBAFL_CC" CXX="$LIBAFL_CXX" -j"$(nproc)"
+                cp libmxml4.a ..
+                cd ..
+            fi
+            "$LIBAFL_CXX" harness.cc libmxml4.a -I mxml-4.0.3/ -lpthread -o fuzzer
             ;;
 
         *)

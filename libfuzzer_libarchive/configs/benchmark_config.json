@@ -1,12 +1,12 @@
 {
   "name": "libarchive_comparison",
-  "target_executions": "20_000_000_000",
+  "target_executions": "200_000_000",
   "poll_interval": 1,
-  "rounds": 3,
-  "pause_between_rounds": 600,
+  "rounds": 1,
+  "pause_between_rounds": 1,
   "instances": [
-    {"config": "baseline_config.json", "cores": "0-2", "broker_port": 1337, "prometheus_port": 8081},
-    {"config": "sais_config.json", "cores": "3-5", "broker_port": 1338, "prometheus_port": 8082},
-    {"config": "mdelta_config.json", "cores": "6-8", "broker_port": 1339, "prometheus_port": 8083}
+    {"config": "baseline_config.json", "cores": "0-1", "broker_port": 1337, "prometheus_port": 8081},
+    {"config": "sais_config.json", "cores": "2-3", "broker_port": 1338, "prometheus_port": 8082},
+    {"config": "mdelta_config.json", "cores": "4-5", "broker_port": 1339, "prometheus_port": 8083}
   ]
 }
