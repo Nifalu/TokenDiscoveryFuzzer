@@ -2,7 +2,7 @@
 name = "TokenDiscoveryFuzzer"
 version = "0.1.0"
 authors = [
-    "Nico Bachmann",
+    "anonymized",
 ]
 edition = "2021"
 
