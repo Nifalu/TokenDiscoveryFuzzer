@@ -59,7 +59,7 @@ impl SmartTokens {
     /// Adds a token to a dictionary, checking it is not a duplicate
     /// Returns `false` if the token was already present and did not get added.
     #[expect(clippy::ptr_arg)]
-    pub fn add_token(&mut self, token: &Vec<u8>) -> Option<usize> {
+    fn add_token(&mut self, token: &Vec<u8>) -> Option<usize> {
         if self.tokens_set.contains(token) {
             return None;
         }
@@ -81,6 +81,24 @@ impl SmartTokens {
                 None => None // reject new token
             }
         }
+    }
+
+    pub fn add_tokens(&mut self, tokens: &[Vec<u8>]) {
+        let cfg = config();
+        for (i, token) in tokens.iter().enumerate() {
+            if !cfg.silent_run {
+                if i < cfg.displayed_tokens {
+                    println!("({}) {:?}", token.len(), String::from_utf8_lossy(token));
+                }
+            }
+            let _ = self.add_token(token);
+        }
+        if !cfg.silent_run {
+            if tokens.len() > cfg.displayed_tokens {
+                println!("... and {} more", tokens.len() - cfg.displayed_tokens);
+            }
+        }
+        
     }
 
     /// Determine which tokens to drop whenever the limit is reached.

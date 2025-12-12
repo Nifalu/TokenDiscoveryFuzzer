@@ -1,176 +1,272 @@
 #!/usr/bin/env python3
-"""
-Fuzzing Pipeline Runner with Crash Organization
-"""
-
-import argparse
-import os
+import json
 import subprocess
-import sys
 import time
+import os
+import signal
+import sys
+import urllib.request
 from pathlib import Path
 
-def main():
-    parser = argparse.ArgumentParser(description='Run fuzzing pipeline')
-    parser.add_argument('target', help='Target library (e.g., libpng, libarchive, libmozjpeg)')
-    parser.add_argument('--no-tokens', action='store_true',
-                        help='Run without token discovery')
-    parser.add_argument('--cores', type=int,
-                        help='Number of cores to use (default: auto)')
-    parser.add_argument('--no-restart', action='store_true',
-                        help='Disable automatic client restart')
+active_processes = {}
 
-    args = parser.parse_args()
+def load_json(path):
+    with open(path) as f:
+        return json.load(f)
 
-    # Check if we're in tmux
-    if os.environ.get('TMUX') is None:
-        print("Error: This script must be run inside a tmux session")
-        print("Run: tmux new -s fuzzing")
-        print("Then run this script again")
+def save_json(data, path):
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def get_local_ip():
+    try:
+        result = subprocess.run(['ip', '-4', 'addr', 'show'], capture_output=True, text=True)
+        for line in result.stdout.split('\n'):
+            if 'inet ' in line and '127.' not in line:
+                return line.split()[1].split('/')[0]
+    except os.error :
+        pass
+    return "127.0.0.1"
+
+def get_instance_name(inst):
+    return inst.get('name', Path(inst['config']).stem)
+
+def fetch_executions(port):
+    """Fetch total executions from Prometheus metrics endpoint."""
+    try:
+        url = f"http://localhost:{port}/metrics"
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            for line in resp.read().decode().split('\n'):
+                if line.startswith('global_executions_total{') and 'client="global"' in line:
+                    return int(float(line.split()[-1]))
+    except TimeoutError:
+        print(f"Timeout connecting to port {port}")
+    except ValueError as e:
+        print(f"Failed to parse metrics from port {port}: {e}")
+    return None
+
+def create_instance_config(base_path, inst, tmp_dir):
+    """Create config with instance overrides."""
+    config = load_json(base_path)
+    config['cores'] = inst['cores']
+    config['broker_port'] = inst['broker_port']
+    config['prometheus_port'] = inst['prometheus_port']
+
+    name = get_instance_name(inst)
+    tmp_path = os.path.join(tmp_dir, f"{name}_config.json")
+    save_json(config, tmp_path)
+    return tmp_path
+
+def get_fuzzer_dir(bench_path):
+    """Derive fuzzer directory from benchmark config path."""
+    # benchmark.json is in libfuzzer_X/configs/, fuzzer dir is libfuzzer_X/
+    config_dir = os.path.dirname(os.path.abspath(bench_path))
+    return os.path.dirname(config_dir)
+
+def cmd_targets(bench_path, host_override=None):
+    """Generate Prometheus targets file."""
+    bench = load_json(bench_path)
+    host = host_override or bench.get('host') or get_local_ip()
+    name = bench.get('name', 'benchmark')
+
+    targets = []
+    for inst in bench['instances']:
+        targets.append({
+            "targets": [f"{host}:{inst['prometheus_port']}"],
+            "labels": {"job": get_instance_name(inst), "benchmark": name}
+        })
+
+    output = f"{name}_targets.json"
+    save_json(targets, output)
+    print(f"Generated {output} (host: {host})")
+
+def cmd_run(bench_path, host_override=None):
+    """Run benchmark, killing instances individually when they reach target."""
+    global active_processes
+
+    bench = load_json(bench_path)
+    config_dir = os.path.dirname(os.path.abspath(bench_path))
+    fuzzer_dir = get_fuzzer_dir(bench_path)
+
+    host = host_override or bench.get('host') or "127.0.0.1"
+    name = bench.get('name', 'benchmark')
+    raw_target = bench.get('target_executions')
+    target = int(str(raw_target).replace("'", "").replace("_", "")) if raw_target else None
+    poll_interval = bench.get('poll_interval', 5)
+    rounds = bench.get('rounds', 1)
+    pause = bench.get('pause_between_rounds', 300)
+
+    fuzzer_bin = os.path.join(fuzzer_dir, "fuzzer")
+    if not os.path.exists(fuzzer_bin):
+        print(f"Error: {fuzzer_bin} not found")
+        print(f"Run: ./build.sh {os.path.basename(fuzzer_dir).replace('libfuzzer_', '')}")
         sys.exit(1)
 
-    # Set up tmux panes - create a 2x2 grid
-    print("Setting up tmux panes...")
+    runs_dir = os.path.join(fuzzer_dir, "runs")
+    os.makedirs(runs_dir, exist_ok=True)
 
-    # First split horizontally (creates left and right)
-    subprocess.run(['tmux', 'split-window', '-h'])
-
-    # Split the LEFT pane vertically (creates top-left and bottom-left)
-    subprocess.run(['tmux', 'select-pane', '-L'])
-    subprocess.run(['tmux', 'split-window', '-v'])
-
-    # Split the RIGHT pane vertically (creates top-right and bottom-right)
-    subprocess.run(['tmux', 'select-pane', '-U'])  # Go back up to top-left
-    subprocess.run(['tmux', 'select-pane', '-R'])  # Move to the right (original right pane)
-    subprocess.run(['tmux', 'split-window', '-v'])
-
-    # Get absolute path for target directory
-    target_dir = Path(f"libfuzzer_{args.target}").absolute()
-
-    # Determine binary name
-    suffix = "with_token_discovery" if not args.no_tokens else "without_token_discovery"
-    fuzzer_binary = f"fuzz_{args.target}_{suffix}"
-    test_binary = f"test_{args.target}"
-    num_cores = args.cores if args.cores else max(1, os.cpu_count() - 2)
-
-    # Send crash testing with organization to BOTTOM-LEFT pane (pane 1)
-    # Send crash testing with organization to BOTTOM-LEFT pane (pane 1)
-    crash_test_cmd = f'''cd {target_dir} && echo "Monitoring and organizing crashes..." && 
-    mkdir -p crashes_organized
-    touch /tmp/.crash_marker
-    
-    while true; do 
-        find crashes -type f -newer /tmp/.crash_marker ! -name ".*" ! -name "dummy" 2>/dev/null | while read f; do
-            echo "=== Testing $(basename "$f") ==="
-            
-            # Run test and capture output for parsing
-            OUTPUT=$(timeout 5 ./{test_binary} "$f" 2>&1)
-            EXIT_CODE=$?
-            
-            # Also show output directly for viewing
-            echo "$OUTPUT" | head -20
-            
-            # Extract crash location from captured output
-            LOCATION=""
-            if echo "$OUTPUT" | grep -q "#0 0x"; then
-                # Extract function name from first stack frame
-                LOCATION=$(echo "$OUTPUT" | grep "#0 0x" | head -1 | sed -E 's/.*in ([^ (]+).*/\\1/' | sed 's/[^a-zA-Z0-9_]/_/g')
-            elif [ $EXIT_CODE -eq 139 ]; then
-                LOCATION="segfault_unknown"
-            elif [ $EXIT_CODE -eq 134 ]; then  
-                LOCATION="abort_unknown"
-            else
-                LOCATION="exit_$EXIT_CODE"
-            fi
-            
-            # Create location directory and move crash
-            [ -n "$LOCATION" ] && mkdir -p "crashes_organized/$LOCATION"
-            [ -n "$LOCATION" ] && cp "$f" "crashes_organized/$LOCATION/"
-            
-            echo ""
-            echo "  -> Organized into: crashes_organized/$LOCATION/"
-            
-            # Update counts
-            echo -n "  Distribution: "
-            for dir in crashes_organized/*/; do
-                [ -d "$dir" ] && echo -n "$(basename "$dir"):$(ls "$dir" | wc -l) "
-            done
-            echo ""
-            echo ""
-        done
-        touch /tmp/.crash_marker
-        sleep 2
-    done'''
-    subprocess.run(['tmux', 'send-keys', '-t', '1', crash_test_cmd, 'Enter'])
-
-    # Send broker command to TOP-RIGHT pane (pane 2)
-    subprocess.run(['tmux', 'send-keys', '-t', '2',
-                    f'cd {target_dir} && ./{fuzzer_binary}',
-                    'Enter'])
-
-    # Send clients command to BOTTOM-RIGHT pane (pane 3)
-    clients_cmd = f'''cd {target_dir} && echo "Starting {num_cores-1} clients..." && 
-    for i in $(seq 1 {num_cores-1}); do 
-        echo "Starting client on core $i"
-        taskset -c $i ./{fuzzer_binary} & 
-    done; 
-    wait'''
-    subprocess.run(['tmux', 'send-keys', '-t', '3', clients_cmd, 'Enter'])
-
-    # Control panel in TOP-LEFT (pane 0) where Python is running
-    print("\n" + "="*60)
-    print("FUZZING CONTROL PANEL")
-    print("="*60)
-    print(f"Target: {args.target}")
-    print(f"Cores: {num_cores}")
-    print(f"Token Discovery: {not args.no_tokens}")
-    print("\nCrashes will be organized in: {}/crashes_organized/".format(target_dir))
-    print("\nPress Ctrl+C to stop all fuzzing processes...")
-    print("="*60)
+    print(f"Benchmark: {name}")
+    print(f"Fuzzer: {fuzzer_dir}")
+    print(f"Target: {target:,} executions" if target else "Target: infinite")
+    print(f"Rounds: {rounds}, Host: {host}")
 
     try:
-        while True:
-            time.sleep(5)
-            # Periodically show crash statistics
-            organized_dir = target_dir / "crashes_organized"
-            if organized_dir.exists():
-                stats = {}
-                for location_dir in organized_dir.iterdir():
-                    if location_dir.is_dir():
-                        count = len(list(location_dir.glob("*")))
-                        if count > 0:
-                            stats[location_dir.name] = count
+        # Create configs once before all rounds
+        tmp_dir = os.path.join(runs_dir, "tmp_configs")
+        os.makedirs(tmp_dir, exist_ok=True)
 
-                if stats:
-                    # Clear line and print stats
-                    print(f"\rCrash distribution: ", end="")
-                    for loc, cnt in sorted(stats.items(), key=lambda x: -x[1])[:5]:
-                        print(f"{loc}:{cnt} ", end="")
-                    print("    ", end="", flush=True)
+        instance_configs = {}
+        for inst in bench['instances']:
+            inst_name = get_instance_name(inst)
+            base_cfg = os.path.join(config_dir, inst['config'])
+            if not os.path.exists(base_cfg):
+                print(f"Warning: {base_cfg} not found, skipping")
+                continue
+            instance_configs[inst_name] = {
+                'cfg_path': create_instance_config(base_cfg, inst, tmp_dir),
+                'port': inst['prometheus_port']
+            }
 
-    except KeyboardInterrupt:
-        print("\n\nStopping all processes...")
+        for rnd in range(1, rounds + 1):
+            print(f"\n{'='*50}\nROUND {rnd}/{rounds}\n{'='*50}")
 
-        # Kill all fuzzer processes
-        subprocess.run(f'pkill -f {fuzzer_binary}', shell=True)
+            active_processes = {}
 
-        # Final statistics
-        organized_dir = target_dir / "crashes_organized"
-        if organized_dir.exists():
-            print("\nFinal crash statistics:")
-            print("-" * 40)
-            total = 0
-            for location_dir in sorted(organized_dir.iterdir()):
-                if location_dir.is_dir():
-                    count = len(list(location_dir.glob("*")))
-                    if count > 0:
-                        print(f"  {location_dir.name:30} : {count:3} crashes")
-                        total += count
-            print("-" * 40)
-            print(f"  {'TOTAL':30} : {total:3} crashes")
+            for inst_name, info in instance_configs.items():
+                cfg_path = info['cfg_path']
 
-        print("\nAll processes stopped. You can close tmux with: tmux kill-session")
-        sys.exit(0)
+                print(f"Starting {inst_name}...")
+                proc = subprocess.Popen(
+                    [fuzzer_bin, cfg_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    cwd=fuzzer_dir,
+                    preexec_fn=os.setsid
+                )
+                active_processes[inst_name] = {'proc': proc, 'port': info['port']}
+
+            if not active_processes:
+                print("No instances started!")
+                sys.exit(1)
+
+            num_instances = len(active_processes)
+            print(f"\nMonitoring {num_instances} instances...\n")
+
+            for _ in range(num_instances):
+                print()
+
+            while active_processes:
+                time.sleep(poll_interval)
+
+                finished = []
+                lines = []
+
+                for inst_name, info in sorted(active_processes.items()):
+                    proc = info['proc']
+
+                    if proc.poll() is not None:
+                        lines.append(f"{inst_name}: exited (code: {proc.returncode})")
+                        finished.append(inst_name)
+                        continue
+
+                    execs = fetch_executions(info['port'])
+                    if execs is not None:
+                        if target:
+                            pct = (execs / target) * 100
+                            lines.append(f"{inst_name}: {execs:>12,} / {target:,} ({pct:5.1f}%)")
+                        else:
+                            lines.append(f"{inst_name}: {execs:>12,}")
+
+                        if target and execs >= target:
+                            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                            finished.append(inst_name)
+                    else:
+                        lines.append(f"{inst_name}: connecting...")
+
+                print(f"\033[{num_instances}A", end='')
+                for line in lines:
+                    print(f"\033[K{line}")
+
+                for inst_name in finished:
+                    del active_processes[inst_name]
+
+            print(f"\nRound {rnd} complete!")
+
+            if rnd < rounds:
+                print(f"Pausing {pause}s...")
+                time.sleep(pause)
+
+        print(f"\n{'='*50}\nBenchmark complete!\n{'='*50}")
+
+    finally:
+        cleanup()
+
+def parse_host_arg():
+    for arg in sys.argv:
+        if arg.startswith('--host='):
+            return arg.split('=', 1)[1]
+        if arg == '--host':
+            idx = sys.argv.index('--host')
+            if idx + 1 < len(sys.argv):
+                return sys.argv[idx + 1]
+    return None
+
+def cleanup():
+    """Kill all spawned processes."""
+    global active_processes
+    if not active_processes:
+        return
+    for name, info in active_processes.items():
+        try:
+            os.killpg(os.getpgid(info['proc'].pid), signal.SIGTERM)
+            print(f"Killed {name}")
+        except (ProcessLookupError, OSError):
+            pass
+    active_processes = {}
+
+def signal_handler(_, __):
+    print("\n\nInterrupted! Cleaning up...")
+    cleanup()
+    sys.exit(130)
+
+def main():
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+
+    if len(sys.argv) < 3:
+        usage()
+
+    cmd = sys.argv[1]
+    config_path = sys.argv[2]
+    host = parse_host_arg()
+
+    if '--host' in sys.argv:
+        idx = sys.argv.index('--host')
+        if idx + 1 < len(sys.argv):
+            host = sys.argv[idx + 1]
+
+    if cmd == 'targets':
+        cmd_targets(config_path, host)
+    elif cmd == 'run':
+        cmd_run(config_path, host)
+    else:
+        usage()
+
+
+def usage():
+    print(f"""Usage: {sys.argv[0]} <command> <config> [--host <ip>]
+
+Commands:
+  targets   Generate Prometheus targets JSON
+  run       Run benchmark
+
+Examples:
+  {sys.argv[0]} targets libfuzzer_libpng/configs/benchmark.json
+  {sys.argv[0]} run libfuzzer_libpng/configs/benchmark.json --host 10.35.146.157
+""")
+    sys.exit(1)
+
 
 if __name__ == '__main__':
     main()

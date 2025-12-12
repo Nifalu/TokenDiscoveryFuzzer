@@ -1,0 +1,15 @@
+{
+  "fuzzer_preset": "baseline",
+  "scheduler_preset": "fast",
+  "silent_run": true,
+  "timeout_secs": 8,
+
+  "extractor": {"type": "corpus"},
+  "pipeline": [],
+
+  "broker_port": 1337,
+  "prometheus_host": "0.0.0.0",
+  "prometheus_port": 8081,
+  "corpus_dir": "./corpus",
+  "crashes_dir": "./crashes_base"
+}

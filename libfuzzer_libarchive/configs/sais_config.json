@@ -1,0 +1,30 @@
+{
+  "fuzzer_preset": "preserving_tokens",
+  "scheduler_preset": "fast",
+  "silent_run": false,
+  "timeout_secs": 8,
+
+  "extractor": {"type": "corpus"},
+  "pipeline": [
+    {"type": "sais", "threshold_fn": {"type": "interpolated", "max_threshold": 0.008, "min_threshold": 0.004, "curve": 1.0}},
+    {"type": "filter_null_bytes", "max_ratio": 0.4},
+    {"type": "split_at", "delimiters": [[0, 0, 0]], "min_length": 3},
+    {"type": "strip_bytes", "bytes": [0, 10, 13, 32], "min_length": 3},
+    {"type": "remove_similar", "threshold": 0.5, "keep_longer": true},
+    {"type": "remove_repetitive", "threshold": 0.6}
+  ],
+
+  "min_corpus_size": 1000,
+  "search_interval": 20000,
+  "max_tokens": 1000,
+  "max_token_length": 64,
+  "min_token_length": 3,
+  "search_pool_size": 5000,
+  "displayed_tokens": 30,
+
+  "broker_port": 1338,
+  "prometheus_host": "0.0.0.0",
+  "prometheus_port": 8082,
+  "corpus_dir": "./corpus",
+  "crashes_dir": "./crashes_sais"
+}

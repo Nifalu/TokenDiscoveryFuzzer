@@ -1,6 +1,7 @@
 corpus/
 corpus*/
 *corpus/
+crashes*/
 *.tar.gz
 *.tar
 test_libpng

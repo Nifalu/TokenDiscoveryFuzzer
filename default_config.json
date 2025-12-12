@@ -1,0 +1,25 @@
+{
+  "fuzzer_preset": "preserving_tokens",
+  "scheduler_preset": "fast",
+  "silent_run": false,
+  "disable_multimonitor": false,
+  "timeout_secs": 8,
+
+  "extractor": {"type": "corpus"},
+  "pipeline": [],
+
+  "min_corpus_size": 500,
+  "search_interval": 10000,
+  "max_tokens": 10000,
+  "max_token_length": 64,
+  "min_token_length": 3,
+  "search_pool_size": 2500,
+  "displayed_tokens": 30,
+
+  "cores": "0-3",
+  "broker_port": 1337,
+  "prometheus_host": "0.0.0.0",
+  "prometheus_port": 8080,
+  "corpus_dir": "./corpus",
+  "crashes_dir": "./crashes"
+}

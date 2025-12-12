@@ -1,16 +1,13 @@
 [package]
 name = "TokenDiscoveryFuzzer"
-version = "0.15.1"
+version = "0.1.0"
 authors = [
-    "Andrea Fioraldi <andreafioraldi@gmail.com>",
-    "Dominik Maier <domenukk@gmail.com>",
+    "Nico Bachmann",
 ]
 edition = "2021"
 
 [features]
-default = ["std", "token_discovery"]
-token_discovery = ["smart_tokens"]
-smart_tokens = []
+default = ["std"]
 std = []
 # Forces a crash
 crash = []
@@ -26,19 +23,19 @@ debug = true
 
 [dependencies]
 libsais = { version = "0.2", default-features = false }
-libafl = {version = "=0.15.2", features = ["default", "prometheus_monitor", "statsd_monitor"]}
-libafl_bolts = "=0.15.2"
-libafl_targets = { version = "=0.15.2", features = [
+libafl = {version = "=0.15.4", features = ["default", "prometheus_monitor", "statsd_monitor"]}
+libafl_bolts = "=0.15.4"
+libafl_targets = { version = "=0.15.4", features = [
     "sancov_pcguard_hitcounts",
     "libfuzzer",
     "sancov_cmplog",
 ]}
-libafl_cc = "0.15.2"
+libafl_cc = "0.15.4"
 
 log = { version = "0.4.22", features = ["release_max_level_info"] }
 mimalloc = { version = "0.1.43", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
-serde_yaml = "0.9.34"
+serde_json = "1.0.145"
 
 [lib]
 name = "fuzzer_framework"
